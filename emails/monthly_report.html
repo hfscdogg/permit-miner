@@ -1,0 +1,179 @@
+<!--
+  PERMIT MINER: Monthly Learning Report Email
+
+  Sent on the 1st of each month. Shows exclusion patterns, conversion
+  metrics, and system performance for the previous month.
+
+  MERGE VARIABLES:
+  {{MONTH_YEAR}} - e.g., "March 2026"
+  {{TOTAL_PROCESSED}} - Raw permits from Shovels
+  {{TOTAL_SENT}} - Postcards mailed
+  {{TOTAL_EXCLUDED}} - Permits excluded (auto + manual)
+  {{TOTAL_ENGAGED}} - QR scans
+  {{TOTAL_CONSULTATIONS}} - Bookings
+  {{SCAN_RATE}} - Sent → Engaged percentage
+  {{BOOKING_RATE}} - Engaged → Consultation percentage
+  {{APPROVAL_RATE}} - Queued → Sent percentage (not excluded)
+  {{NEW_RULES}} - Auto-generated exclusion rules this month
+  {{TOP_CONTRACTORS_ROWS}} - Most excluded contractors table
+  {{TOP_REASONS_ROWS}} - Exclusion reasons breakdown
+  {{ZIP_PERFORMANCE_ROWS}} - Per-ZIP stats
+  {{COST_STATS}} - Cost per lead metrics
+  {{DRIP_STATS}} - Second-touch performance (if enabled)
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, Helvetica, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4;">
+    <tr>
+      <td align="center" style="padding: 20px 10px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+
+          <!-- HEADER -->
+          <tr>
+            <td style="background-color: #1B3A4B; padding: 24px;">
+              <span style="color: #e8943a; font-size: 20px; font-weight: bold; letter-spacing: 1px;">PERMIT MINER</span>
+              <br>
+              <span style="color: #ffffff; font-size: 16px;">Monthly Report — {{MONTH_YEAR}}</span>
+            </td>
+          </tr>
+
+          <!-- FUNNEL METRICS -->
+          <tr>
+            <td style="padding: 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="center" style="padding: 12px; width: 20%;">
+                    <span style="font-size: 24px; font-weight: bold; color: #1B3A4B;">{{TOTAL_PROCESSED}}</span>
+                    <br><span style="font-size: 10px; color: #999;">Processed</span>
+                  </td>
+                  <td align="center" style="padding: 12px; width: 20%;">
+                    <span style="font-size: 24px; font-weight: bold; color: #2E75B6;">{{TOTAL_SENT}}</span>
+                    <br><span style="font-size: 10px; color: #999;">Mailed</span>
+                  </td>
+                  <td align="center" style="padding: 12px; width: 20%;">
+                    <span style="font-size: 24px; font-weight: bold; color: #999;">{{TOTAL_EXCLUDED}}</span>
+                    <br><span style="font-size: 10px; color: #999;">Excluded</span>
+                  </td>
+                  <td align="center" style="padding: 12px; width: 20%;">
+                    <span style="font-size: 24px; font-weight: bold; color: #2E7D32;">{{TOTAL_ENGAGED}}</span>
+                    <br><span style="font-size: 10px; color: #999;">Scanned</span>
+                  </td>
+                  <td align="center" style="padding: 12px; width: 20%;">
+                    <span style="font-size: 24px; font-weight: bold; color: #E65100;">{{TOTAL_CONSULTATIONS}}</span>
+                    <br><span style="font-size: 10px; color: #999;">Booked</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CONVERSION RATES -->
+          <tr>
+            <td style="padding: 0 24px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background: #f5f5f5; border-radius: 6px;">
+                <tr>
+                  <td style="padding: 12px 16px; font-size: 13px;">
+                    <strong>Scan Rate:</strong> {{SCAN_RATE}} (postcards → scans)
+                    &nbsp;&nbsp;|&nbsp;&nbsp;
+                    <strong>Booking Rate:</strong> {{BOOKING_RATE}} (scans → consultations)
+                    <br>
+                    <strong>Approval Rate:</strong> {{APPROVAL_RATE}} (queued → sent, not excluded)
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- EXCLUSION LEARNING -->
+          <tr>
+            <td style="padding: 0 24px;">
+              <h3 style="color: #1B3A4B; font-size: 14px; margin: 0 0 8px 0;">Exclusion Learning</h3>
+              <p style="font-size: 12px; color: #666; margin: 0 0 12px 0;">
+                {{NEW_RULES}} new auto-exclusion rules created this month.
+              </p>
+            </td>
+          </tr>
+
+          <!-- TOP EXCLUDED CONTRACTORS -->
+          <tr>
+            <td style="padding: 0 24px 16px;">
+              <p style="font-size: 11px; color: #999; font-weight: bold; margin: 0 0 4px 0;">MOST EXCLUDED CONTRACTORS</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12px; border-collapse: collapse;">
+                <tr style="background: #f5f5f5;">
+                  <th style="padding: 6px 8px; text-align: left; font-size: 11px; color: #666;">Contractor</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Exclusions</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Auto-blocked?</th>
+                </tr>
+                {{TOP_CONTRACTORS_ROWS}}
+              </table>
+            </td>
+          </tr>
+
+          <!-- EXCLUSION REASONS BREAKDOWN -->
+          <tr>
+            <td style="padding: 0 24px 16px;">
+              <p style="font-size: 11px; color: #999; font-weight: bold; margin: 0 0 4px 0;">EXCLUSION REASONS</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12px; border-collapse: collapse;">
+                <tr style="background: #f5f5f5;">
+                  <th style="padding: 6px 8px; text-align: left; font-size: 11px; color: #666;">Reason</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Count</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">% of Total</th>
+                </tr>
+                {{TOP_REASONS_ROWS}}
+              </table>
+            </td>
+          </tr>
+
+          <!-- ZIP CODE PERFORMANCE -->
+          <tr>
+            <td style="padding: 0 24px 16px;">
+              <p style="font-size: 11px; color: #999; font-weight: bold; margin: 0 0 4px 0;">ZIP CODE PERFORMANCE</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12px; border-collapse: collapse;">
+                <tr style="background: #f5f5f5;">
+                  <th style="padding: 6px 8px; text-align: left; font-size: 11px; color: #666;">ZIP</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Found</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Sent</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Excluded</th>
+                  <th style="padding: 6px 8px; text-align: center; font-size: 11px; color: #666;">Scanned</th>
+                </tr>
+                {{ZIP_PERFORMANCE_ROWS}}
+              </table>
+            </td>
+          </tr>
+
+          <!-- COST -->
+          <tr>
+            <td style="padding: 0 24px 24px;">
+              <div style="background: #FFF3E0; padding: 12px 16px; border-radius: 6px; font-size: 12px;">
+                {{COST_STATS}}
+              </div>
+            </td>
+          </tr>
+
+          <!-- DRIP PERFORMANCE (if enabled) -->
+          <tr>
+            <td style="padding: 0 24px 24px; font-size: 12px; color: #666;">
+              {{DRIP_STATS}}
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding: 16px 24px; font-size: 11px; color: #999; border-top: 1px solid #eee;">
+              Permit Miner Monthly Report &nbsp;|&nbsp; Livewire
+              <br>
+              Manage settings: <a href="https://creatorapp.zoho.com/livewire/permit-miner" style="color: #2E75B6;">Zoho Creator Dashboard</a>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

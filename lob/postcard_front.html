@@ -1,0 +1,203 @@
+<!--
+  PERMIT MINER: Lob Postcard Front (6x11)
+  Livewire branded. Print-ready HTML for Lob API.
+
+  Lob 6x11 specs:
+  - Final size: 6" x 11" (after trim)
+  - Full bleed: 6.25" x 11.25"
+  - Safe area: 5.75" x 10.75" (0.125" from each edge)
+  - All important content must be within safe area
+-->
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      width: 11.25in;
+      height: 6.25in;
+      background: #1a2744;
+      font-family: 'Montserrat', 'Arial', sans-serif;
+      color: #ffffff;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .bleed-wrapper {
+      position: absolute;
+      top: 0.125in;
+      left: 0.125in;
+      right: 0.125in;
+      bottom: 0.125in;
+    }
+
+    .safe-area {
+      position: absolute;
+      top: 0.125in;
+      left: 0.125in;
+      right: 0.125in;
+      bottom: 0.125in;
+      display: flex;
+      flex-direction: row;
+    }
+
+    .left-panel {
+      flex: 1;
+      padding: 0.4in 0.3in 0.4in 0.4in;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .right-panel {
+      width: 4.5in;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .right-panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: linear-gradient(135deg, rgba(26, 39, 68, 0.3), rgba(26, 39, 68, 0.1));
+      z-index: 1;
+    }
+
+    /* Placeholder for lifestyle image - replace with hosted image URL */
+    .right-panel {
+      background: linear-gradient(135deg, #2a3f5f, #1a2744);
+    }
+
+    .logo {
+      margin-bottom: 0.2in;
+    }
+
+    .logo img {
+      height: 0.4in;
+    }
+
+    /* Fallback if logo image unavailable */
+    .logo-text {
+      font-size: 28pt;
+      font-weight: 700;
+      letter-spacing: 3px;
+      color: #e8943a;
+    }
+
+    .headline {
+      font-size: 24pt;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 0.15in;
+      color: #ffffff;
+    }
+
+    .headline .accent {
+      color: #e8943a;
+    }
+
+    .subheadline {
+      font-size: 12pt;
+      font-weight: 400;
+      line-height: 1.5;
+      color: rgba(255, 255, 255, 0.85);
+      margin-bottom: 0.2in;
+    }
+
+    .greeting {
+      font-size: 11pt;
+      font-weight: 600;
+      color: #e8943a;
+      margin-bottom: 0.1in;
+    }
+
+    .tagline {
+      font-size: 9pt;
+      color: rgba(255, 255, 255, 0.6);
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .divider {
+      width: 2in;
+      height: 2px;
+      background: #e8943a;
+      margin: 0.15in 0;
+    }
+
+    .services-list {
+      font-size: 9pt;
+      color: rgba(255, 255, 255, 0.8);
+      line-height: 1.6;
+    }
+
+    .services-list span {
+      color: #e8943a;
+      margin-right: 4px;
+    }
+
+    /* Decorative geometric element */
+    .geo-accent {
+      position: absolute;
+      bottom: -0.5in;
+      right: 3.5in;
+      width: 3in;
+      height: 3in;
+      border: 2px solid rgba(232, 148, 58, 0.15);
+      border-radius: 50%;
+      z-index: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="geo-accent"></div>
+  <div class="bleed-wrapper">
+    <div class="safe-area">
+      <div class="left-panel">
+        <div>
+          <div class="logo">
+            <!-- Replace src with hosted Livewire logo URL -->
+            <div class="logo-text">LIVEWIRE</div>
+          </div>
+
+          <div class="greeting">Dear {{name}},</div>
+
+          <div class="headline">
+            Your Home.<br>
+            Our <span class="accent">Expertise.</span>
+          </div>
+
+          <div class="subheadline">
+            Premium smart home technology — designed, installed, and supported by Richmond's most trusted integrator.
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="services-list">
+            <span>&#9654;</span> Whole-Home Networking<br>
+            <span>&#9654;</span> Lighting Control & Design<br>
+            <span>&#9654;</span> Distributed Audio & Video<br>
+            <span>&#9654;</span> Security & Surveillance<br>
+            <span>&#9654;</span> Motorized Shading
+          </div>
+        </div>
+
+        <div class="tagline">
+          Serving Richmond Since 2003
+        </div>
+      </div>
+
+      <div class="right-panel">
+        <!-- Replace with lifestyle/smart home image -->
+        <!-- Example: <img src="https://getlivewire.com/wp-content/uploads/postcard-hero.jpg" style="width:100%;height:100%;object-fit:cover;"> -->
+      </div>
+    </div>
+  </div>
+</body>
+</html>

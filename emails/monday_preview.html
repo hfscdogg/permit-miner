@@ -1,0 +1,122 @@
+<!--
+  PERMIT MINER: Monday Preview Email Template
+
+  Sent to Henry every Monday morning. Shows all queued permits
+  with Exclude buttons for each row. Mobile-friendly HTML tables.
+
+  MERGE VARIABLES (populated by Deluge):
+  {{BATCH_DATE}} - Today's date
+  {{QUEUED_COUNT}} - Number of permits queued
+  {{STATS_LINE}} - Processing stats summary
+  {{PERMIT_ROWS}} - HTML table rows (built by monday_pull.ds)
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Permit Miner Preview</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, Helvetica, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4;">
+    <tr>
+      <td align="center" style="padding: 20px 10px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 700px; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+
+          <!-- HEADER -->
+          <tr>
+            <td style="background-color: #1B3A4B; padding: 20px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td>
+                    <span style="color: #e8943a; font-size: 20px; font-weight: bold; letter-spacing: 1px;">PERMIT MINER</span>
+                    <br>
+                    <span style="color: rgba(255,255,255,0.7); font-size: 12px;">Preview — {{BATCH_DATE}}</span>
+                  </td>
+                  <td align="right">
+                    <span style="color: #ffffff; font-size: 28px; font-weight: bold;">{{QUEUED_COUNT}}</span>
+                    <br>
+                    <span style="color: rgba(255,255,255,0.7); font-size: 11px;">postcards queued</span>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- INSTRUCTIONS -->
+          <tr>
+            <td style="padding: 16px 24px; background-color: #FFF3E0; border-bottom: 1px solid #FFE0B2;">
+              <span style="font-size: 13px; color: #E65100;">
+                <strong>Review below.</strong> Tap Exclude on any bad leads. Everything else mails automatically tomorrow at 8 AM.
+              </span>
+            </td>
+          </tr>
+
+          <!-- STATS -->
+          <tr>
+            <td style="padding: 12px 24px; font-size: 12px; color: #999;">
+              {{STATS_LINE}}
+            </td>
+          </tr>
+
+          <!-- PERMIT TABLE -->
+          <tr>
+            <td style="padding: 0 16px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 12px; border-collapse: collapse;">
+                <!-- Table header -->
+                <tr style="background-color: #1B3A4B;">
+                  <th style="padding: 8px; color: #fff; text-align: left; font-size: 11px;">Owner / Address</th>
+                  <th style="padding: 8px; color: #fff; text-align: left; font-size: 11px;">Value</th>
+                  <th style="padding: 8px; color: #fff; text-align: left; font-size: 11px;">Contractor</th>
+                  <th style="padding: 8px; color: #fff; text-align: left; font-size: 11px;">Contact</th>
+                  <th style="padding: 8px; color: #fff; text-align: center; font-size: 11px;">Action</th>
+                </tr>
+
+                <!-- SAMPLE ROW (Deluge builds these dynamically) -->
+                <!--
+                <tr style="background-color: #ffffff; border-bottom: 1px solid #eee;">
+                  <td style="padding: 8px;">
+                    <strong>Josh L Goldberg</strong><br>
+                    <span style="color: #666;">1234 Main St, Richmond, VA 23226</span><br>
+                    <span style="color: #2E7D32; font-size: 10px; font-weight: bold;">NEW CONSTRUCTION</span>
+                  </td>
+                  <td style="padding: 8px;">
+                    $1,250,000<br>
+                    <span style="color: #999; font-size: 10px;">Job: $450,000</span>
+                  </td>
+                  <td style="padding: 8px;">
+                    Biscuit Run Homes
+                  </td>
+                  <td style="padding: 8px;">
+                    (804) 555-0123<br>
+                    josh@email.com
+                  </td>
+                  <td style="padding: 8px; text-align: center;">
+                    <a href="https://creatorapp.zoho.com/livewire/permit-miner/#Form:Exclude_Permit?record_id=12345"
+                       style="background-color: #c62828; color: #ffffff; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 11px; font-weight: bold; display: inline-block;">
+                      Exclude
+                    </a>
+                  </td>
+                </tr>
+                -->
+
+                {{PERMIT_ROWS}}
+              </table>
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding: 16px 24px; font-size: 11px; color: #999; border-top: 1px solid #eee; margin-top: 16px;">
+              <strong>No action needed for postcards to send.</strong> Anything not excluded by 8 AM Tuesday goes out automatically.
+              <br><br>
+              Permit Miner by Livewire &nbsp;|&nbsp; Powered by Shovels + Lob
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

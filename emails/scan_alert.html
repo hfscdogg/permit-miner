@@ -1,0 +1,109 @@
+<!--
+  PERMIT MINER: QR Scan Alert Email
+
+  Sent to sales team in real-time when a homeowner scans their postcard QR code.
+
+  MERGE VARIABLES:
+  {{OWNER_NAME}} - Property owner name
+  {{ADDRESS}} - Full property address
+  {{ASSESSED_VALUE}} - Formatted assessed value
+  {{PERMIT_TAGS}} - Permit type/tags
+  {{CONTRACTOR}} - Contractor name
+  {{PHONE}} - Owner phone (may be blank)
+  {{EMAIL}} - Owner email (may be blank)
+  {{LINKEDIN}} - LinkedIn URL (may be blank)
+  {{TOUCH_NUMBER}} - 1 or 2
+  {{SCAN_TIME}} - Formatted timestamp
+  {{CRM_LEAD_URL}} - Direct link to CRM Lead
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f4f4; font-family: Arial, Helvetica, sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f4f4f4;">
+    <tr>
+      <td align="center" style="padding: 20px 10px;">
+        <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 500px; background-color: #ffffff; border-radius: 8px; overflow: hidden;">
+
+          <!-- GREEN ALERT BANNER -->
+          <tr>
+            <td style="background-color: #E8F5E9; border-left: 5px solid #2E7D32; padding: 20px 24px;">
+              <span style="color: #2E7D32; font-size: 11px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px;">QR Code Scanned</span>
+              <br>
+              <span style="color: #1B5E20; font-size: 22px; font-weight: bold;">{{OWNER_NAME}}</span>
+              <br>
+              <span style="color: #555; font-size: 13px;">just scanned their postcard</span>
+            </td>
+          </tr>
+
+          <!-- DETAILS -->
+          <tr>
+            <td style="padding: 20px 24px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 14px;">
+                <tr>
+                  <td style="padding: 6px 0; color: #999; width: 100px;">Address</td>
+                  <td style="padding: 6px 0; font-weight: bold;">{{ADDRESS}}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #999;">Value</td>
+                  <td style="padding: 6px 0;">{{ASSESSED_VALUE}}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #999;">Type</td>
+                  <td style="padding: 6px 0;">{{PERMIT_TAGS}}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0; color: #999;">Contractor</td>
+                  <td style="padding: 6px 0;">{{CONTRACTOR}}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CONTACT INFO (if available) -->
+          <tr>
+            <td style="padding: 0 24px 20px;">
+              <table width="100%" cellpadding="0" cellspacing="0" style="background: #f8f8f8; border-radius: 6px; padding: 12px 16px;">
+                <tr>
+                  <td>
+                    <!-- Phone (prominent if available) -->
+                    <a href="tel:{{PHONE}}" style="color: #1B3A4B; font-size: 18px; font-weight: bold; text-decoration: none; display: block; margin-bottom: 4px;">
+                      {{PHONE}}
+                    </a>
+                    <!-- Email -->
+                    <a href="mailto:{{EMAIL}}" style="color: #2E75B6; font-size: 13px; text-decoration: none;">
+                      {{EMAIL}}
+                    </a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CRM BUTTON -->
+          <tr>
+            <td align="center" style="padding: 0 24px 24px;">
+              <a href="{{CRM_LEAD_URL}}" style="background-color: #1B3A4B; color: #ffffff; padding: 14px 32px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: bold; display: inline-block;">
+                Open CRM Lead
+              </a>
+            </td>
+          </tr>
+
+          <!-- FOOTER -->
+          <tr>
+            <td style="padding: 12px 24px; font-size: 11px; color: #999; border-top: 1px solid #eee;">
+              Scanned at {{SCAN_TIME}} &nbsp;|&nbsp; Touch #{{TOUCH_NUMBER}}
+              <br>
+              Permit Miner by Livewire
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

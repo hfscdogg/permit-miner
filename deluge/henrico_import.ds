@@ -1,0 +1,306 @@
+// ============================================================================
+// PERMIT MINER: HENRICO COUNTY DIRECT IMPORT
+// Schedule: 5th of each month at 8:00 AM ET
+//
+// Shovels does not cover Henrico County. This function downloads the monthly
+// building permit Excel file from henrico.gov and imports qualifying permits
+// for ZIPs 23229, 23233, 23238.
+//
+// Phase 1b: Build after Shovels pipeline is validated (Day 11).
+// ============================================================================
+
+// --- LOAD CONFIG ---
+config = Permit_Miner_Config[Customer_ID == "livewire"];
+if (config.count() == 0 || config.Active == false)
+{
+    return;
+}
+
+// --- BUILD EXCEL URL ---
+// Henrico publishes at: https://henrico.gov/assets/[MON][YEAR]_BuildingPermit.xlsx
+// e.g., FEB2026_BuildingPermit.xlsx
+// We want LAST month's file (published after month end)
+lastMonth = zoho.currentdate.subMonth(1);
+monthAbbrev = lastMonth.toString("MMM").toUpperCase();  // "FEB", "MAR", etc.
+year = lastMonth.toString("yyyy");                       // "2026"
+fileName = monthAbbrev + year + "_BuildingPermit.xlsx";
+fileUrl = "https://henrico.gov/assets/" + fileName;
+
+// Target Henrico ZIPs
+henricoZips = List();
+henricoZips.add("23229");
+henricoZips.add("23233");
+henricoZips.add("23238");
+
+// Qualifying keywords for job description matching
+// (Henrico data has descriptions, unlike Shovels Richmond data)
+qualifyingKeywords = List();
+qualifyingKeywords.add("new construction");
+qualifyingKeywords.add("new dwelling");
+qualifyingKeywords.add("new home");
+qualifyingKeywords.add("addition");
+qualifyingKeywords.add("renovation");
+qualifyingKeywords.add("remodel");
+qualifyingKeywords.add("pool");
+qualifyingKeywords.add("deck");
+qualifyingKeywords.add("kitchen");
+qualifyingKeywords.add("bath");
+qualifyingKeywords.add("outdoor");
+qualifyingKeywords.add("patio");
+qualifyingKeywords.add("sunroom");
+qualifyingKeywords.add("garage");
+qualifyingKeywords.add("basement");
+
+// --- DOWNLOAD EXCEL FILE ---
+importedCount = 0;
+skippedCount = 0;
+errorMsg = "";
+
+try
+{
+    // Download the file
+    // NOTE: Deluge's invokeurl can fetch files. The exact method to parse Excel
+    // depends on Zoho Creator's workbook integration capabilities.
+    // If direct Excel parsing is not available, alternative approaches:
+    // 1. Use Zoho Sheet integration to import the file
+    // 2. Use a Zoho Flow step to convert Excel to JSON
+    // 3. Upload to a staging Zoho Creator form via file field
+
+    fileResponse = invokeurl
+    [
+        url: fileUrl
+        type: GET
+        detailed: true
+    ];
+
+    if (fileResponse.get("statusCode") != 200)
+    {
+        errorMsg = "Failed to download Henrico Excel file. Status: " + fileResponse.get("statusCode") + ". URL: " + fileUrl;
+        // File may not be published yet. Alert Henry.
+        sendmail
+        [
+            from: zoho.adminuserid
+            to: config.Alert_Recipients
+            subject: "Permit Miner: Henrico import failed - file not found"
+            message: errorMsg + "\n\nThe " + monthAbbrev + " " + year + " file may not be published yet. Check henrico.gov/bldg/public-data/ and retry manually."
+        ];
+        return;
+    }
+
+    // --- PARSE EXCEL ROWS ---
+    // Expected columns (verify against actual file and update if needed):
+    // A: Permit Number
+    // B: Issue Date
+    // C: Job Address
+    // D: Job City
+    // E: Job ZIP
+    // F: Owner Name
+    // G: Contractor Name
+    // H: Job Information / Description
+    // I: Job Value (may or may not be present)
+    //
+    // IMPORTANT: Column mapping may change. If Henrico changes their format,
+    // update the column indices below.
+
+    // Parse using Zoho's workbook integration
+    // This is a simplified representation - actual Deluge workbook parsing
+    // may require uploading the file to a staging area first
+    excelData = fileResponse.get("responseText");
+
+    // For each row in the Excel file:
+    // (Actual implementation depends on how Zoho Creator handles Excel parsing)
+    for each row in excelData
+    {
+        permitNumber = row.get("Permit Number");
+        jobAddress = ifnull(row.get("Job Address"), "");
+        jobCity = ifnull(row.get("Job City"), "");
+        jobZip = ifnull(row.get("Job ZIP"), "").trim();
+        ownerName = ifnull(row.get("Owner Name"), "");
+        contractorName = ifnull(row.get("Contractor Name"), "");
+        jobDescription = ifnull(row.get("Job Information"), "").toLowerCase();
+        issueDate = row.get("Issue Date");
+
+        // --- FILTER 1: ZIP CODE ---
+        if (!henricoZips.contains(jobZip))
+        {
+            continue;
+        }
+
+        // --- FILTER 2: QUALIFYING WORK TYPE (keyword matching) ---
+        hasQualifyingKeyword = false;
+        matchedKeyword = "";
+        for each keyword in qualifyingKeywords
+        {
+            if (jobDescription.contains(keyword))
+            {
+                hasQualifyingKeyword = true;
+                matchedKeyword = keyword;
+                break;
+            }
+        }
+        if (!hasQualifyingKeyword)
+        {
+            skippedCount = skippedCount + 1;
+            continue;
+        }
+
+        // --- FILTER 3: SKIP OBVIOUSLY NON-RESIDENTIAL ---
+        skipKeywords = List();
+        skipKeywords.add("commercial");
+        skipKeywords.add("church");
+        skipKeywords.add("school");
+        skipKeywords.add("apartment complex");
+        skipKeywords.add("office");
+        skipKeywords.add("retail");
+        skipKeywords.add("warehouse");
+
+        isNonResidential = false;
+        for each skipKw in skipKeywords
+        {
+            if (jobDescription.contains(skipKw))
+            {
+                isNonResidential = true;
+                break;
+            }
+        }
+        if (isNonResidential) { continue; }
+
+        // Build full address for dedup
+        fullAddress = jobAddress + ", " + jobCity + ", VA " + jobZip;
+        fullAddress = fullAddress.trim();
+
+        // --- FILTER 4: DEDUP ---
+        existing = Permit_Miner_Leads[Property_Address == fullAddress && Customer_ID == "livewire"];
+        if (existing.count() > 0)
+        {
+            skippedCount = skippedCount + 1;
+            continue;
+        }
+
+        // --- CHECK EXCLUSION RULES ---
+        exclusionRules = Permit_Miner_Exclusion_Rules[Customer_ID == "livewire" && Active == true];
+        isExcluded = false;
+        for each rule in exclusionRules
+        {
+            if (rule.Rule_Type == "Address" && fullAddress.toLowerCase() == rule.Rule_Value.toLowerCase())
+            {
+                isExcluded = true;
+                break;
+            }
+            if (rule.Rule_Type == "Contractor" && contractorName.toLowerCase() == rule.Rule_Value.toLowerCase())
+            {
+                isExcluded = true;
+                break;
+            }
+            if (rule.Rule_Type == "Keyword" && jobDescription.contains(rule.Rule_Value.toLowerCase()))
+            {
+                isExcluded = true;
+                break;
+            }
+            if (rule.Rule_Type == "Owner_Name" && ownerName.toLowerCase().contains(rule.Rule_Value.toLowerCase()))
+            {
+                isExcluded = true;
+                break;
+            }
+        }
+        if (isExcluded) { continue; }
+
+        // --- DETECT NEW CONSTRUCTION ---
+        isNewConstruction = jobDescription.contains("new construction")
+            || jobDescription.contains("new dwelling")
+            || jobDescription.contains("new home")
+            || jobDescription.contains("new single")
+            || jobDescription.contains("new res");
+
+        // --- DETERMINE PERMIT TYPE TAGS ---
+        derivedTags = List();
+        if (isNewConstruction) { derivedTags.add("new_construction"); }
+        if (jobDescription.contains("remodel") || jobDescription.contains("renovation")) { derivedTags.add("remodel"); }
+        if (jobDescription.contains("addition")) { derivedTags.add("addition"); }
+        if (jobDescription.contains("pool")) { derivedTags.add("pool_and_hot_tub"); }
+        if (jobDescription.contains("deck") || jobDescription.contains("patio") || jobDescription.contains("outdoor")) { derivedTags.add("deck_outdoor"); }
+        if (jobDescription.contains("kitchen") || jobDescription.contains("bath")) { derivedTags.add("kitchen_bath"); }
+
+        // --- GENERATE PURL ---
+        purlId = "henrico_" + permitNumber;
+        purlUrl = config.PURL_Base_URL + "?pid=" + purlId
+            + "&utm_source=" + config.PURL_UTM_Source
+            + "&utm_medium=" + config.PURL_UTM_Medium
+            + "&utm_campaign=" + config.PURL_UTM_Campaign
+            + "&utm_content=" + purlId;
+
+        // --- CREATE RECORD ---
+        // NOTE: Henrico data does NOT include assessed value, owner type,
+        // phone, email, LinkedIn, income, or net worth.
+        insert into Permit_Miner_Leads
+        [
+            Customer_ID = "livewire"
+            Source = "Henrico Direct"
+            Batch_Date = zoho.currentdate
+            Permit_ID = "henrico_" + permitNumber
+            Permit_Number = permitNumber
+            Permit_Type = jobDescription.left(200)
+            Permit_Tags = derivedTags.toString(",")
+            Permit_Description = jobDescription
+            Permit_File_Date = issueDate
+            Property_Address = fullAddress
+            Property_Street_No = ""
+            Property_Street = jobAddress
+            Property_City = jobCity
+            Property_State = "VA"
+            Property_ZIP = jobZip
+            Property_Assessed_Value_Cents = 0
+            Property_Owner_Type = ""
+            Property_Legal_Owner = ownerName
+            Is_New_Construction = isNewConstruction
+            Contractor_Name = contractorName
+            Status = "Queued"
+            Value_Flag = "Henrico Direct - no assessed value available"
+            PURL_ID = purlId
+            PURL_URL = purlUrl
+            Touch_Number = 1
+            QR_Scanned = false
+            Scan_Count = 0
+            Consultation_Booked = false
+        ];
+
+        importedCount = importedCount + 1;
+    }
+}
+catch (e)
+{
+    errorMsg = "Henrico import error: " + e.toString();
+    sendmail
+    [
+        from: zoho.adminuserid
+        to: config.Alert_Recipients
+        subject: "Permit Miner: Henrico import error"
+        message: errorMsg
+    ];
+}
+
+// --- UPDATE LAST IMPORT DATE ---
+config.Last_Henrico_Import = zoho.currenttime;
+
+// --- SEND IMPORT SUMMARY ---
+if (importedCount > 0)
+{
+    sendmail
+    [
+        from: zoho.adminuserid
+        to: config.Preview_Recipients
+        subject: "Permit Miner: Henrico County import - " + importedCount + " permits queued"
+        message: "<html><body style='font-family: Arial, sans-serif;'><h2 style='color: #1B3A4B;'>Henrico County Import Complete</h2><p><strong>" + importedCount + "</strong> qualifying permits imported from " + monthAbbrev + " " + year + " data.</p><p>" + skippedCount + " permits skipped (non-qualifying, duplicate, or excluded).</p><p>These permits will appear in tomorrow's Monday preview email alongside any Shovels-sourced permits. If the import ran mid-week, a special preview will be sent on the 6th.</p><p style='color: #999; font-size: 12px;'>Note: Henrico records do not include assessed property value, owner type, phone, email, or enrichment data. Postcards still send. Contact fields will be blank in the digest.</p></body></html>"
+        content_type: "text/html"
+    ];
+}
+else
+{
+    sendmail
+    [
+        from: zoho.adminuserid
+        to: config.Preview_Recipients
+        subject: "Permit Miner: Henrico County import - 0 new permits"
+        message: "No new qualifying permits found in the " + monthAbbrev + " " + year + " Henrico County data for ZIPs 23229, 23233, 23238. " + skippedCount + " permits were reviewed but did not qualify."
+    ];
+}

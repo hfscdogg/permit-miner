@@ -1,0 +1,253 @@
+// ============================================================================
+// PERMIT MINER: MONTHLY LEARNING REPORT
+// Schedule: 1st of each month at 9:00 AM ET
+//
+// Aggregates last month's performance: permits processed, sent, excluded,
+// engaged, consultations. Analyzes exclusion patterns and conversion metrics.
+// ============================================================================
+
+// --- LOAD CONFIG ---
+config = Permit_Miner_Config[Customer_ID == "livewire"];
+if (config.count() == 0 || config.Active == false)
+{
+    return;
+}
+
+// --- DATE RANGE: Last month ---
+today = zoho.currentdate;
+firstOfThisMonth = today.toString("yyyy-MM") + "-01";
+lastMonth = today.subMonth(1);
+firstOfLastMonth = lastMonth.toString("yyyy-MM") + "-01";
+monthYear = lastMonth.toString("MMMM yyyy");
+
+// --- QUERY LAST MONTH'S RECORDS ---
+allRecords = Permit_Miner_Leads[
+    Customer_ID == "livewire"
+    && Created_Date >= firstOfLastMonth
+    && Created_Date < firstOfThisMonth
+];
+
+// Count by status
+totalProcessed = allRecords.count();
+sentRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && (Status == "Sent" || Status == "Engaged" || Status == "Consultation Scheduled" || Status == "Converted" || Status == "Drip Sent")];
+excludedRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && Status == "Excluded"];
+engagedRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && (Status == "Engaged" || Status == "Consultation Scheduled" || Status == "Converted")];
+consultationRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && (Status == "Consultation Scheduled" || Status == "Converted")];
+lobErrorRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && Status == "Lob Error"];
+
+totalSent = sentRecords.count();
+totalExcluded = excludedRecords.count();
+totalEngaged = engagedRecords.count();
+totalConsultations = consultationRecords.count();
+totalLobErrors = lobErrorRecords.count();
+
+// --- CONVERSION RATES ---
+scanRate = if(totalSent > 0, ((totalEngaged * 100) / totalSent).toString("#0.0") + "%", "N/A");
+bookingRate = if(totalEngaged > 0, ((totalConsultations * 100) / totalEngaged).toString("#0.0") + "%", "N/A");
+approvalRate = if(totalProcessed > 0, ((totalSent * 100) / totalProcessed).toString("#0.0") + "%", "N/A");
+
+// --- EXCLUSION ANALYSIS ---
+
+// Count by exclusion reason
+reasonCounts = Map();
+for each exRec in excludedRecords
+{
+    reason = ifnull(exRec.Exclude_Reason, "Unknown");
+    // Normalize custom reasons
+    if (reason.startsWith("Custom:")) { reason = "Custom reason"; }
+    currentCount = ifnull(reasonCounts.get(reason), 0);
+    reasonCounts.put(reason, currentCount + 1);
+}
+
+// Build exclusion reasons table rows
+reasonRows = "";
+for each reason in reasonCounts.keys()
+{
+    count = reasonCounts.get(reason);
+    pct = if(totalExcluded > 0, ((count * 100) / totalExcluded).toString("#0") + "%", "0%");
+    reasonRows = reasonRows + "<tr><td style='padding: 4px 8px;'>" + reason + "</td>";
+    reasonRows = reasonRows + "<td style='padding: 4px 8px; text-align: center;'>" + count + "</td>";
+    reasonRows = reasonRows + "<td style='padding: 4px 8px; text-align: center;'>" + pct + "</td></tr>";
+}
+
+// --- TOP EXCLUDED CONTRACTORS ---
+contractorCounts = Map();
+for each exRec in excludedRecords
+{
+    contractor = ifnull(exRec.Contractor_Name, "Unknown");
+    if (contractor != "" && contractor != "Unknown")
+    {
+        currentCount = ifnull(contractorCounts.get(contractor), 0);
+        contractorCounts.put(contractor, currentCount + 1);
+    }
+}
+
+contractorRows = "";
+for each contractor in contractorCounts.keys()
+{
+    count = contractorCounts.get(contractor);
+    // Check if auto-blocked
+    existingRule = Permit_Miner_Exclusion_Rules[Customer_ID == "livewire" && Rule_Type == "Contractor" && Rule_Value == contractor && Active == true];
+    isBlocked = if(existingRule.count() > 0, "Yes", "No");
+    contractorRows = contractorRows + "<tr><td style='padding: 4px 8px;'>" + contractor + "</td>";
+    contractorRows = contractorRows + "<td style='padding: 4px 8px; text-align: center;'>" + count + "</td>";
+    contractorRows = contractorRows + "<td style='padding: 4px 8px; text-align: center;'>" + isBlocked + "</td></tr>";
+}
+
+// --- NEW AUTO-GENERATED RULES ---
+newRules = Permit_Miner_Exclusion_Rules[
+    Customer_ID == "livewire"
+    && Auto_Generated == true
+    && Created_Date >= firstOfLastMonth
+    && Created_Date < firstOfThisMonth
+];
+newRulesCount = newRules.count();
+
+// --- ZIP CODE PERFORMANCE ---
+zipStats = Map();
+for each rec in allRecords
+{
+    zip = ifnull(rec.Property_ZIP, "Unknown");
+    if (!zipStats.containsKey(zip))
+    {
+        zipStats.put(zip, Map());
+        zipStats.get(zip).put("found", 0);
+        zipStats.get(zip).put("sent", 0);
+        zipStats.get(zip).put("excluded", 0);
+        zipStats.get(zip).put("scanned", 0);
+    }
+    stats = zipStats.get(zip);
+    stats.put("found", stats.get("found") + 1);
+    if (rec.Status == "Sent" || rec.Status == "Engaged" || rec.Status == "Consultation Scheduled" || rec.Status == "Converted" || rec.Status == "Drip Sent")
+    {
+        stats.put("sent", stats.get("sent") + 1);
+    }
+    if (rec.Status == "Excluded") { stats.put("excluded", stats.get("excluded") + 1); }
+    if (rec.QR_Scanned == true) { stats.put("scanned", stats.get("scanned") + 1); }
+}
+
+zipRows = "";
+for each zip in zipStats.keys()
+{
+    stats = zipStats.get(zip);
+    zipRows = zipRows + "<tr>";
+    zipRows = zipRows + "<td style='padding: 4px 8px;'>" + zip + "</td>";
+    zipRows = zipRows + "<td style='padding: 4px 8px; text-align: center;'>" + stats.get("found") + "</td>";
+    zipRows = zipRows + "<td style='padding: 4px 8px; text-align: center;'>" + stats.get("sent") + "</td>";
+    zipRows = zipRows + "<td style='padding: 4px 8px; text-align: center;'>" + stats.get("excluded") + "</td>";
+    zipRows = zipRows + "<td style='padding: 4px 8px; text-align: center;'>" + stats.get("scanned") + "</td>";
+    zipRows = zipRows + "</tr>";
+}
+
+// --- COST ESTIMATE ---
+// Approximate postcard cost at $0.90 each (midpoint of $0.70-$1.10)
+postcardCost = totalSent * 0.90;
+costPerScan = if(totalEngaged > 0, (postcardCost / totalEngaged).toString("$#,##0.00"), "N/A");
+costPerConsultation = if(totalConsultations > 0, (postcardCost / totalConsultations).toString("$#,##0.00"), "N/A");
+costStats = "<strong>Estimated postcard spend:</strong> $" + postcardCost.toString("#,##0.00") + " (" + totalSent + " x ~$0.90)";
+costStats = costStats + " &nbsp;|&nbsp; <strong>Cost per scan:</strong> " + costPerScan;
+costStats = costStats + " &nbsp;|&nbsp; <strong>Cost per consultation:</strong> " + costPerConsultation;
+
+// --- DRIP STATS ---
+dripStats = "";
+if (config.Drip_Enabled)
+{
+    dripSent = Permit_Miner_Leads[Customer_ID == "livewire" && Touch_Number == 2 && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && (Status == "Drip Sent" || Status == "Engaged" || Status == "Consultation Scheduled")];
+    dripScanned = Permit_Miner_Leads[Customer_ID == "livewire" && Touch_Number == 2 && Created_Date >= firstOfLastMonth && Created_Date < firstOfThisMonth && QR_Scanned == true];
+    dripScanRate = if(dripSent.count() > 0, ((dripScanned.count() * 100) / dripSent.count()).toString("#0.0") + "%", "N/A");
+    dripStats = "<strong>Drip Performance:</strong> " + dripSent.count() + " second-touch postcards sent, " + dripScanned.count() + " scanned (" + dripScanRate + " scan rate). Compare to first-touch: " + scanRate + ".";
+}
+else
+{
+    dripStats = "<em>Multi-touch drip is currently disabled. Enable in settings to start sending second-touch postcards.</em>";
+}
+
+// --- BUILD AND SEND REPORT ---
+emailBody = "<html><body style='font-family: Arial, sans-serif; color: #333; max-width: 600px;'>";
+
+// Header
+emailBody = emailBody + "<div style='background: #1B3A4B; padding: 24px; color: #fff;'>";
+emailBody = emailBody + "<span style='color: #e8943a; font-size: 20px; font-weight: bold;'>PERMIT MINER</span><br>";
+emailBody = emailBody + "<span style='font-size: 16px;'>Monthly Report - " + monthYear + "</span>";
+emailBody = emailBody + "</div>";
+
+// Funnel metrics
+emailBody = emailBody + "<div style='padding: 24px;'>";
+emailBody = emailBody + "<table width='100%' cellpadding='0' cellspacing='0'><tr>";
+emailBody = emailBody + "<td align='center' style='padding: 12px;'><span style='font-size: 24px; font-weight: bold; color: #1B3A4B;'>" + totalProcessed + "</span><br><span style='font-size: 10px; color: #999;'>Processed</span></td>";
+emailBody = emailBody + "<td align='center' style='padding: 12px;'><span style='font-size: 24px; font-weight: bold; color: #2E75B6;'>" + totalSent + "</span><br><span style='font-size: 10px; color: #999;'>Mailed</span></td>";
+emailBody = emailBody + "<td align='center' style='padding: 12px;'><span style='font-size: 24px; font-weight: bold; color: #999;'>" + totalExcluded + "</span><br><span style='font-size: 10px; color: #999;'>Excluded</span></td>";
+emailBody = emailBody + "<td align='center' style='padding: 12px;'><span style='font-size: 24px; font-weight: bold; color: #2E7D32;'>" + totalEngaged + "</span><br><span style='font-size: 10px; color: #999;'>Scanned</span></td>";
+emailBody = emailBody + "<td align='center' style='padding: 12px;'><span style='font-size: 24px; font-weight: bold; color: #E65100;'>" + totalConsultations + "</span><br><span style='font-size: 10px; color: #999;'>Booked</span></td>";
+emailBody = emailBody + "</tr></table>";
+emailBody = emailBody + "</div>";
+
+// Conversion rates
+emailBody = emailBody + "<div style='padding: 0 24px 24px;'>";
+emailBody = emailBody + "<div style='background: #f5f5f5; padding: 12px 16px; border-radius: 6px; font-size: 13px;'>";
+emailBody = emailBody + "<strong>Scan Rate:</strong> " + scanRate + " &nbsp;|&nbsp; <strong>Booking Rate:</strong> " + bookingRate + " &nbsp;|&nbsp; <strong>Approval Rate:</strong> " + approvalRate;
+emailBody = emailBody + "</div></div>";
+
+// Exclusion learning
+emailBody = emailBody + "<div style='padding: 0 24px;'>";
+emailBody = emailBody + "<h3 style='color: #1B3A4B; font-size: 14px;'>Exclusion Learning</h3>";
+emailBody = emailBody + "<p style='font-size: 12px; color: #666;'>" + newRulesCount + " new auto-exclusion rules created this month.</p>";
+emailBody = emailBody + "</div>";
+
+// Top excluded contractors
+if (contractorRows != "")
+{
+    emailBody = emailBody + "<div style='padding: 0 24px 16px;'>";
+    emailBody = emailBody + "<p style='font-size: 11px; color: #999; font-weight: bold;'>MOST EXCLUDED CONTRACTORS</p>";
+    emailBody = emailBody + "<table width='100%' style='font-size: 12px; border-collapse: collapse;'>";
+    emailBody = emailBody + "<tr style='background: #f5f5f5;'><th style='padding: 6px 8px; text-align: left; font-size: 11px; color: #666;'>Contractor</th><th style='padding: 6px 8px; text-align: center; font-size: 11px; color: #666;'>Exclusions</th><th style='padding: 6px 8px; text-align: center; font-size: 11px; color: #666;'>Auto-blocked?</th></tr>";
+    emailBody = emailBody + contractorRows;
+    emailBody = emailBody + "</table></div>";
+}
+
+// Exclusion reasons
+if (reasonRows != "")
+{
+    emailBody = emailBody + "<div style='padding: 0 24px 16px;'>";
+    emailBody = emailBody + "<p style='font-size: 11px; color: #999; font-weight: bold;'>EXCLUSION REASONS</p>";
+    emailBody = emailBody + "<table width='100%' style='font-size: 12px; border-collapse: collapse;'>";
+    emailBody = emailBody + "<tr style='background: #f5f5f5;'><th style='padding: 6px 8px; text-align: left; font-size: 11px; color: #666;'>Reason</th><th style='padding: 6px 8px; text-align: center; font-size: 11px; color: #666;'>Count</th><th style='padding: 6px 8px; text-align: center; font-size: 11px; color: #666;'>% of Total</th></tr>";
+    emailBody = emailBody + reasonRows;
+    emailBody = emailBody + "</table></div>";
+}
+
+// ZIP code performance
+if (zipRows != "")
+{
+    emailBody = emailBody + "<div style='padding: 0 24px 16px;'>";
+    emailBody = emailBody + "<p style='font-size: 11px; color: #999; font-weight: bold;'>ZIP CODE PERFORMANCE</p>";
+    emailBody = emailBody + "<table width='100%' style='font-size: 12px; border-collapse: collapse;'>";
+    emailBody = emailBody + "<tr style='background: #f5f5f5;'><th style='padding: 6px 8px; text-align: left;'>ZIP</th><th style='padding: 6px 8px; text-align: center;'>Found</th><th style='padding: 6px 8px; text-align: center;'>Sent</th><th style='padding: 6px 8px; text-align: center;'>Excluded</th><th style='padding: 6px 8px; text-align: center;'>Scanned</th></tr>";
+    emailBody = emailBody + zipRows;
+    emailBody = emailBody + "</table></div>";
+}
+
+// Cost
+emailBody = emailBody + "<div style='padding: 0 24px 24px;'>";
+emailBody = emailBody + "<div style='background: #FFF3E0; padding: 12px 16px; border-radius: 6px; font-size: 12px;'>" + costStats + "</div>";
+emailBody = emailBody + "</div>";
+
+// Drip
+emailBody = emailBody + "<div style='padding: 0 24px 24px; font-size: 12px; color: #666;'>" + dripStats + "</div>";
+
+// Footer
+emailBody = emailBody + "<div style='padding: 16px 24px; font-size: 11px; color: #999; border-top: 1px solid #eee;'>";
+emailBody = emailBody + "Permit Miner Monthly Report | Livewire<br>";
+emailBody = emailBody + "Manage settings: <a href='https://creatorapp.zoho.com/livewire/permit-miner' style='color: #2E75B6;'>Zoho Creator Dashboard</a>";
+emailBody = emailBody + "</div>";
+
+emailBody = emailBody + "</body></html>";
+
+sendmail
+[
+    from: zoho.adminuserid
+    to: config.Preview_Recipients
+    subject: "Permit Miner Monthly Report - " + monthYear
+    message: emailBody
+    content_type: "text/html"
+];

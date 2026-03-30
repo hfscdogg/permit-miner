@@ -1,0 +1,690 @@
+// ============================================================================
+// PERMIT MINER: MONDAY PULL + PREVIEW
+// Schedule: Every Monday at 8:00 AM ET
+//
+// Flow: Query Shovels API for each ZIP → filter → enrich → store as Queued
+//       → run drip check → send preview email to Henry
+// ============================================================================
+
+// --- LOAD CONFIG ---
+config = Permit_Miner_Config[Customer_ID == "livewire"];
+if (config.count() == 0 || config.Active == false)
+{
+    return;
+}
+
+shovelsKey = config.Shovels_API_Key;
+zipList = config.Target_ZIP_Codes.toList(",");
+minAssessedCents = config.Min_Assessed_Value.toLong() * 100;  // Config stores dollars, API returns cents
+qualifyingTags = config.Qualifying_Tags.toList(",");
+newConstructionTags = config.New_Construction_Tags.toList(",");
+newConstructionTypeKeywords = config.New_Construction_Type_Keywords.toList(",");
+exclusionThreshold = config.Exclusion_Threshold;
+
+// Calculate date range: last run date to today
+lastRun = config.Last_Monday_Run;
+if (lastRun == null)
+{
+    // First run: look back 30 days
+    lastRun = zoho.currentdate.subDay(30);
+}
+permitFrom = lastRun.toString("yyyy-MM-dd");
+permitTo = zoho.currentdate.toString("yyyy-MM-dd");
+
+// --- LOAD ACTIVE EXCLUSION RULES ---
+exclusionRules = Permit_Miner_Exclusion_Rules[Customer_ID == "livewire" && Active == true];
+contractorBlocklist = List();
+keywordBlocklist = List();
+addressBlocklist = List();
+ownerBlocklist = List();
+
+for each rule in exclusionRules
+{
+    if (rule.Rule_Type == "Contractor")
+    {
+        contractorBlocklist.add(rule.Rule_Value.toLowerCase());
+    }
+    else if (rule.Rule_Type == "Keyword")
+    {
+        keywordBlocklist.add(rule.Rule_Value.toLowerCase());
+    }
+    else if (rule.Rule_Type == "Address")
+    {
+        addressBlocklist.add(rule.Rule_Value.toLowerCase());
+    }
+    else if (rule.Rule_Type == "Owner_Name")
+    {
+        ownerBlocklist.add(rule.Rule_Value.toLowerCase());
+    }
+}
+
+// --- COUNTERS ---
+queuedCount = 0;
+skippedDedup = 0;
+skippedOwnerType = 0;
+skippedValue = 0;
+skippedExclusion = 0;
+apiErrors = 0;
+totalProcessed = 0;
+
+// --- PROCESS EACH ZIP CODE ---
+for each zip in zipList
+{
+    cursor = null;
+    zipHasError = false;
+
+    // Pagination loop
+    while (true)
+    {
+        // Build Shovels API URL
+        apiUrl = "https://api.shovels.ai/v2/permits/search";
+        params = Map();
+        params.put("geo_id", zip.trim());
+        params.put("permit_from", permitFrom);
+        params.put("permit_to", permitTo);
+        params.put("property_type", "residential");
+        params.put("size", "100");
+        if (cursor != null)
+        {
+            params.put("cursor", cursor);
+        }
+
+        headers = Map();
+        headers.put("X-API-Key", shovelsKey);
+
+        // Call Shovels API with retry
+        response = null;
+        retryCount = 0;
+        while (retryCount < 2)
+        {
+            try
+            {
+                response = invokeurl
+                [
+                    url: apiUrl
+                    type: GET
+                    parameters: params
+                    headers: headers
+                    detailed: true
+                ];
+
+                statusCode = response.get("statusCode");
+                if (statusCode == 200)
+                {
+                    response = response.get("responseText").toMap();
+                    break;
+                }
+                else if (statusCode == 402)
+                {
+                    // Credit limit exceeded - alert and stop
+                    sendmail
+                    [
+                        from: zoho.adminuserid
+                        to: config.Alert_Recipients
+                        subject: "ALERT: Permit Miner - Shovels API Credits Exhausted"
+                        message: "Shovels API returned 402 (Payment Required) while processing ZIP " + zip + ". " + queuedCount + " permits were queued before the limit was hit. Contact Shovels to increase your credit limit."
+                    ];
+                    // Process what we have so far
+                    zipHasError = true;
+                    break;
+                }
+                else
+                {
+                    retryCount = retryCount + 1;
+                    if (retryCount < 2) { zoho.sleep(30000); }  // Wait 30s before retry
+                }
+            }
+            catch (e)
+            {
+                retryCount = retryCount + 1;
+                if (retryCount < 2) { zoho.sleep(30000); }
+            }
+        }
+
+        if (response == null || zipHasError)
+        {
+            apiErrors = apiErrors + 1;
+            break;
+        }
+
+        items = response.get("items");
+        if (items == null || items.size() == 0)
+        {
+            break;
+        }
+
+        // --- PROCESS EACH PERMIT ---
+        for each permit in items
+        {
+            totalProcessed = totalProcessed + 1;
+
+            // Extract core fields
+            permitId = permit.get("id");
+            ownerName = ifnull(permit.get("property_legal_owner"), "");
+            ownerType = ifnull(permit.get("property_owner_type"), "");
+            marketValRaw = permit.get("property_assess_market_value");
+            marketVal = if (marketValRaw != null, marketValRaw.toLong(), 0);
+            tags = ifnull(permit.get("tags"), List());
+            permitType = ifnull(permit.get("type"), "");
+            permitSubtype = ifnull(permit.get("subtype"), "");
+            permitDesc = ifnull(permit.get("description"), "");
+            fileDate = permit.get("file_date");
+            jobValueRaw = permit.get("job_value");
+            jobValue = if (jobValueRaw != null, jobValueRaw.toLong(), 0);
+            contractorId = permit.get("contractor_id");
+
+            // Build address
+            addr = permit.get("address");
+            streetNo = ifnull(addr.get("street_no"), "");
+            street = ifnull(addr.get("street"), "");
+            city = ifnull(addr.get("city"), "");
+            state = ifnull(addr.get("state"), "");
+            zipCode = ifnull(addr.get("zip_code"), "");
+            fullAddress = streetNo + " " + street + ", " + city + ", " + state + " " + zipCode;
+            fullAddress = fullAddress.trim();
+
+            // Get address_id for contact enrichment
+            geoIds = permit.get("geo_ids");
+            addressGeoId = "";
+            if (geoIds != null)
+            {
+                addressGeoId = ifnull(geoIds.get("address_id"), "");
+            }
+
+            // ---- FILTER 1: DEDUP CHECK ----
+            existing = Permit_Miner_Leads[Property_Address == fullAddress && Customer_ID == "livewire"];
+            if (existing.count() > 0)
+            {
+                skippedDedup = skippedDedup + 1;
+                continue;
+            }
+
+            // ---- FILTER 2: OWNER TYPE ----
+            // Only mail to individuals. Skip company_owned and null.
+            if (ownerType != "individual")
+            {
+                skippedOwnerType = skippedOwnerType + 1;
+                continue;
+            }
+
+            // ---- DETECT NEW CONSTRUCTION ----
+            isNewConstruction = false;
+            for each ncTag in newConstructionTags
+            {
+                if (tags.contains(ncTag.trim()))
+                {
+                    isNewConstruction = true;
+                    break;
+                }
+            }
+            if (!isNewConstruction)
+            {
+                for each ncKeyword in newConstructionTypeKeywords
+                {
+                    if (permitType.toLowerCase().contains(ncKeyword.trim().toLowerCase()))
+                    {
+                        isNewConstruction = true;
+                        break;
+                    }
+                }
+            }
+
+            // ---- FILTER 3: VALUE FILTER ----
+            // New construction ALWAYS bypasses this filter
+            valueFlag = "";
+            if (!isNewConstruction)
+            {
+                if (marketVal == 0 || marketValRaw == null)
+                {
+                    // Null/zero value and NOT new construction: include but flag for review
+                    valueFlag = "Value unknown";
+                }
+                else if (marketVal < minAssessedCents)
+                {
+                    skippedValue = skippedValue + 1;
+                    continue;
+                }
+            }
+
+            // ---- FILTER 4: TAG FILTER ----
+            // At least one tag must match qualifying tags, OR is new construction
+            hasQualifyingTag = isNewConstruction;  // New construction always qualifies
+            if (!hasQualifyingTag)
+            {
+                for each tag in tags
+                {
+                    for each qTag in qualifyingTags
+                    {
+                        if (tag.trim().toLowerCase() == qTag.trim().toLowerCase())
+                        {
+                            hasQualifyingTag = true;
+                            break;
+                        }
+                    }
+                    if (hasQualifyingTag) { break; }
+                }
+            }
+            if (!hasQualifyingTag)
+            {
+                continue;
+            }
+
+            // ---- FILTER 5: EXCLUSION RULES ----
+            isExcluded = false;
+
+            // Check address blocklist
+            for each blockedAddr in addressBlocklist
+            {
+                if (fullAddress.toLowerCase() == blockedAddr)
+                {
+                    isExcluded = true;
+                    break;
+                }
+            }
+
+            // Check owner blocklist
+            if (!isExcluded)
+            {
+                for each blockedOwner in ownerBlocklist
+                {
+                    if (ownerName.toLowerCase().contains(blockedOwner))
+                    {
+                        isExcluded = true;
+                        break;
+                    }
+                }
+            }
+
+            // Check contractor blocklist (need to look up contractor name first)
+            // Check keyword blocklist against description and type
+            if (!isExcluded)
+            {
+                for each blockedKeyword in keywordBlocklist
+                {
+                    if (permitDesc.toLowerCase().contains(blockedKeyword) || permitType.toLowerCase().contains(blockedKeyword))
+                    {
+                        isExcluded = true;
+                        break;
+                    }
+                }
+            }
+
+            if (isExcluded)
+            {
+                skippedExclusion = skippedExclusion + 1;
+                // Update last_triggered_date on the matching rule
+                continue;
+            }
+
+            // ---- CONTACT ENRICHMENT ----
+            residentName = "";
+            residentPhone = "";
+            residentEmail = "";
+            residentLinkedIn = "";
+            residentIncome = "";
+            residentNetWorth = "";
+
+            if (addressGeoId != "")
+            {
+                try
+                {
+                    residentUrl = "https://api.shovels.ai/v2/addresses/" + addressGeoId + "/residents";
+                    resHeaders = Map();
+                    resHeaders.put("X-API-Key", shovelsKey);
+
+                    resResponse = invokeurl
+                    [
+                        url: residentUrl
+                        type: GET
+                        headers: resHeaders
+                        detailed: true
+                    ];
+
+                    if (resResponse.get("statusCode") == 200)
+                    {
+                        residents = resResponse.get("responseText").toMap().get("items");
+                        if (residents != null && residents.size() > 0)
+                        {
+                            // Take first homeowner, or first resident if no homeowner flagged
+                            resident = residents.get(0);
+                            for each res in residents
+                            {
+                                if (ifnull(res.get("is_homeowner"), false) == true)
+                                {
+                                    resident = res;
+                                    break;
+                                }
+                            }
+
+                            residentName = ifnull(resident.get("name"), "");
+                            residentPhone = ifnull(resident.get("phone"), "");
+                            emails = resident.get("personal_emails");
+                            if (emails != null && emails.size() > 0)
+                            {
+                                residentEmail = emails.get(0);
+                            }
+                            residentLinkedIn = ifnull(resident.get("linkedin_url"), "");
+                            residentIncome = ifnull(resident.get("income_range"), "");
+                            residentNetWorth = ifnull(resident.get("net_worth"), "");
+                        }
+                    }
+                }
+                catch (e)
+                {
+                    // Contact enrichment failure is not blocking. Continue with blank fields.
+                }
+            }
+
+            // ---- CONTRACTOR LOOKUP ----
+            contractorName = "";
+            if (contractorId != null && contractorId != "")
+            {
+                // Check contractor against blocklist before looking up
+                try
+                {
+                    conUrl = "https://api.shovels.ai/v2/contractors?id=" + contractorId;
+                    conHeaders = Map();
+                    conHeaders.put("X-API-Key", shovelsKey);
+
+                    conResponse = invokeurl
+                    [
+                        url: conUrl
+                        type: GET
+                        headers: conHeaders
+                        detailed: true
+                    ];
+
+                    if (conResponse.get("statusCode") == 200)
+                    {
+                        conData = conResponse.get("responseText").toMap();
+                        items_con = conData.get("items");
+                        if (items_con != null && items_con.size() > 0)
+                        {
+                            contractorName = ifnull(items_con.get(0).get("business_name"), "");
+                        }
+                    }
+                }
+                catch (e)
+                {
+                    // Contractor lookup failure is not blocking
+                }
+
+                // Now check contractor against blocklist
+                if (contractorName != "")
+                {
+                    for each blockedCon in contractorBlocklist
+                    {
+                        if (contractorName.toLowerCase() == blockedCon)
+                        {
+                            isExcluded = true;
+                            skippedExclusion = skippedExclusion + 1;
+                            break;
+                        }
+                    }
+                    if (isExcluded) { continue; }
+                }
+            }
+
+            // ---- GENERATE PURL ----
+            // Use permit ID as the unique PURL identifier
+            purlId = permitId;
+            utmCampaign = config.PURL_UTM_Campaign;
+            purlUrl = config.PURL_Base_URL + "?pid=" + purlId + "&utm_source=" + config.PURL_UTM_Source + "&utm_medium=" + config.PURL_UTM_Medium + "&utm_campaign=" + utmCampaign + "&utm_content=" + purlId;
+
+            // ---- CREATE QUEUED RECORD ----
+            // Determine value flag
+            if (ownerType == null || ownerType == "")
+            {
+                if (valueFlag != "")
+                {
+                    valueFlag = valueFlag + "; Owner type unknown";
+                }
+                else
+                {
+                    valueFlag = "Owner type unknown";
+                }
+            }
+
+            // Format assessed value for display
+            assessedDollars = marketVal / 100;
+            jobDollars = jobValue / 100;
+
+            newRecord = insert into Permit_Miner_Leads
+            [
+                Customer_ID = "livewire"
+                Source = "Shovels API"
+                Batch_Date = zoho.currentdate
+                Permit_ID = permitId
+                Permit_Type = permitType
+                Permit_Subtype = permitSubtype
+                Permit_Tags = tags.toString(",")
+                Permit_Description = permitDesc
+                Permit_File_Date = fileDate
+                Permit_Job_Value_Cents = jobValue
+                Property_Address = fullAddress
+                Property_Street_No = streetNo
+                Property_Street = street
+                Property_City = city
+                Property_State = state
+                Property_ZIP = zipCode
+                Property_Assessed_Value_Cents = marketVal
+                Property_Owner_Type = ownerType
+                Property_Legal_Owner = ownerName
+                Is_New_Construction = isNewConstruction
+                Address_Geo_ID = addressGeoId
+                Contractor_ID = contractorId
+                Contractor_Name = contractorName
+                Resident_Name = residentName
+                Resident_Phone = residentPhone
+                Resident_Email = residentEmail
+                Resident_LinkedIn = residentLinkedIn
+                Resident_Income_Range = residentIncome
+                Resident_Net_Worth = residentNetWorth
+                Status = "Queued"
+                Value_Flag = valueFlag
+                PURL_ID = purlId
+                PURL_URL = purlUrl
+                Touch_Number = 1
+                QR_Scanned = false
+                Scan_Count = 0
+                Consultation_Booked = false
+            ];
+
+            queuedCount = queuedCount + 1;
+        }
+
+        // Check for next page
+        cursor = response.get("next_cursor");
+        if (cursor == null || cursor == "")
+        {
+            break;
+        }
+    }
+
+    if (zipHasError) { break; }  // Stop processing if credit limit hit
+}
+
+// --- DRIP CHECK ---
+// Check for sent records eligible for second touch (only if drip is enabled)
+if (config.Drip_Enabled == true)
+{
+    dripDelay = config.Drip_Delay_Days;
+    dripCutoff = zoho.currentdate.subDay(dripDelay);
+
+    dripCandidates = Permit_Miner_Leads[
+        Customer_ID == "livewire"
+        && Status == "Sent"
+        && QR_Scanned == false
+        && Touch_Number == 1
+        && Sent_Date <= dripCutoff
+    ];
+
+    dripUtmCampaign = config.PURL_Drip_UTM_Campaign;
+
+    for each candidate in dripCandidates
+    {
+        // Create a new Drip Queued record
+        dripPurlId = candidate.Permit_ID + "_drip";
+        dripPurlUrl = config.PURL_Base_URL + "?pid=" + dripPurlId + "&utm_source=" + config.PURL_UTM_Source + "&utm_medium=" + config.PURL_UTM_Medium + "&utm_campaign=" + dripUtmCampaign + "&utm_content=" + dripPurlId;
+
+        insert into Permit_Miner_Leads
+        [
+            Customer_ID = "livewire"
+            Source = candidate.Source
+            Batch_Date = zoho.currentdate
+            Permit_ID = candidate.Permit_ID + "_touch2"
+            Permit_Type = candidate.Permit_Type
+            Permit_Subtype = candidate.Permit_Subtype
+            Permit_Tags = candidate.Permit_Tags
+            Permit_Description = candidate.Permit_Description
+            Permit_File_Date = candidate.Permit_File_Date
+            Permit_Job_Value_Cents = candidate.Permit_Job_Value_Cents
+            Property_Address = candidate.Property_Address
+            Property_Street_No = candidate.Property_Street_No
+            Property_Street = candidate.Property_Street
+            Property_City = candidate.Property_City
+            Property_State = candidate.Property_State
+            Property_ZIP = candidate.Property_ZIP
+            Property_Assessed_Value_Cents = candidate.Property_Assessed_Value_Cents
+            Property_Owner_Type = candidate.Property_Owner_Type
+            Property_Legal_Owner = candidate.Property_Legal_Owner
+            Is_New_Construction = candidate.Is_New_Construction
+            Address_Geo_ID = candidate.Address_Geo_ID
+            Contractor_ID = candidate.Contractor_ID
+            Contractor_Name = candidate.Contractor_Name
+            Resident_Name = candidate.Resident_Name
+            Resident_Phone = candidate.Resident_Phone
+            Resident_Email = candidate.Resident_Email
+            Resident_LinkedIn = candidate.Resident_LinkedIn
+            Resident_Income_Range = candidate.Resident_Income_Range
+            Resident_Net_Worth = candidate.Resident_Net_Worth
+            Status = "Drip Queued"
+            PURL_ID = dripPurlId
+            PURL_URL = dripPurlUrl
+            Touch_Number = 2
+            Parent_Lead_ID = candidate.ID
+            QR_Scanned = false
+            Scan_Count = 0
+            Consultation_Booked = false
+        ];
+
+        // Update original record status
+        candidate.Status = "Drip Queued";
+    }
+}
+
+// --- UPDATE LAST RUN DATE ---
+config.Last_Monday_Run = zoho.currenttime;
+
+// --- BUILD AND SEND PREVIEW EMAIL ---
+queuedRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Status == "Queued" && Batch_Date == zoho.currentdate];
+// Also include Drip Queued records
+dripRecords = Permit_Miner_Leads[Customer_ID == "livewire" && Status == "Drip Queued" && Batch_Date == zoho.currentdate];
+
+totalQueued = queuedRecords.count() + dripRecords.count();
+
+if (totalQueued == 0)
+{
+    // Send zero-results email
+    emailBody = "<html><body style='font-family: Arial, sans-serif; color: #333;'>";
+    emailBody = emailBody + "<h2 style='color: #1B3A4B;'>Permit Miner Preview</h2>";
+    emailBody = emailBody + "<p>No new qualifying permits this week for the Richmond metro area.</p>";
+    emailBody = emailBody + "<p style='color: #666; font-size: 12px;'>Processed " + totalProcessed + " permits across " + zipList.size() + " ZIP codes. ";
+    emailBody = emailBody + "Skipped: " + skippedDedup + " duplicates, " + skippedOwnerType + " non-individual, " + skippedValue + " below threshold, " + skippedExclusion + " exclusion rules.</p>";
+    if (apiErrors > 0)
+    {
+        emailBody = emailBody + "<p style='color: #c00;'>API errors on " + apiErrors + " ZIP code(s). Check Shovels API status.</p>";
+    }
+    emailBody = emailBody + "</body></html>";
+
+    sendmail
+    [
+        from: zoho.adminuserid
+        to: config.Preview_Recipients
+        subject: "Permit Miner Preview: 0 postcards queued"
+        message: emailBody
+        content_type: "text/html"
+    ];
+    return;
+}
+
+// Build HTML preview table
+emailBody = "<html><body style='font-family: Arial, sans-serif; color: #333; max-width: 900px;'>";
+emailBody = emailBody + "<h2 style='color: #1B3A4B;'>Permit Miner Preview: " + totalQueued + " postcards queued for tomorrow</h2>";
+emailBody = emailBody + "<p>Review the permits below. Tap <strong>Exclude</strong> on any row to remove it before tomorrow's mailing. If you do nothing, all " + totalQueued + " postcards send automatically Tuesday morning.</p>";
+
+// Stats summary
+emailBody = emailBody + "<p style='font-size: 13px; color: #666;'>Processed " + totalProcessed + " permits | " + skippedDedup + " duplicates | " + skippedOwnerType + " non-individual | " + skippedValue + " below threshold | " + skippedExclusion + " auto-excluded</p>";
+
+// Table header
+emailBody = emailBody + "<table style='width: 100%; border-collapse: collapse; font-size: 13px;'>";
+emailBody = emailBody + "<tr style='background: #1B3A4B; color: #fff;'>";
+emailBody = emailBody + "<th style='padding: 8px; text-align: left;'>Owner / Address</th>";
+emailBody = emailBody + "<th style='padding: 8px; text-align: left;'>Value</th>";
+emailBody = emailBody + "<th style='padding: 8px; text-align: left;'>Type</th>";
+emailBody = emailBody + "<th style='padding: 8px; text-align: left;'>Contractor</th>";
+emailBody = emailBody + "<th style='padding: 8px; text-align: left;'>Contact</th>";
+emailBody = emailBody + "<th style='padding: 8px; text-align: center;'>Action</th>";
+emailBody = emailBody + "</tr>";
+
+// Combine new + drip records for the email
+allQueued = List();
+for each rec in queuedRecords { allQueued.add(rec); }
+for each rec in dripRecords { allQueued.add(rec); }
+
+rowIndex = 0;
+for each rec in allQueued
+{
+    bgColor = if(rowIndex % 2 == 0, "#fff", "#f5f5f5");
+    touchLabel = if(rec.Touch_Number == 2, "<span style='color: #E65100; font-weight: bold;'>[2ND TOUCH]</span> ", "");
+    flagLabel = if(rec.Value_Flag != "" && rec.Value_Flag != null, "<br><span style='color: #c00; font-size: 11px;'>" + rec.Value_Flag + "</span>", "");
+    newBuildLabel = if(rec.Is_New_Construction, "<br><span style='color: #2E7D32; font-size: 11px; font-weight: bold;'>NEW CONSTRUCTION</span>", "");
+
+    assessedDisplay = if(rec.Property_Assessed_Value_Cents > 0, "$" + (rec.Property_Assessed_Value_Cents / 100).toString("#,##0"), "N/A");
+    jobDisplay = if(rec.Permit_Job_Value_Cents > 0, "<br>Job: $" + (rec.Permit_Job_Value_Cents / 100).toString("#,##0"), "");
+
+    contactInfo = "";
+    if (rec.Resident_Phone != "" && rec.Resident_Phone != null) { contactInfo = rec.Resident_Phone; }
+    if (rec.Resident_Email != "" && rec.Resident_Email != null) { contactInfo = contactInfo + "<br>" + rec.Resident_Email; }
+    if (contactInfo == "") { contactInfo = "<span style='color: #999;'>No contact data</span>"; }
+
+    // Exclude button URL - links to Zoho Creator form
+    excludeUrl = "https://creatorapp.zoho.com/livewire/permit-miner/#Form:Exclude_Permit?record_id=" + rec.ID;
+
+    emailBody = emailBody + "<tr style='background: " + bgColor + ";'>";
+    emailBody = emailBody + "<td style='padding: 8px;'>" + touchLabel + "<strong>" + rec.Property_Legal_Owner + "</strong><br>" + rec.Property_Address + flagLabel + newBuildLabel + "</td>";
+    emailBody = emailBody + "<td style='padding: 8px;'>" + assessedDisplay + jobDisplay + "</td>";
+    emailBody = emailBody + "<td style='padding: 8px;'>" + ifnull(rec.Permit_Tags, "") + "</td>";
+    emailBody = emailBody + "<td style='padding: 8px;'>" + ifnull(rec.Contractor_Name, "<span style='color: #999;'>Unknown</span>") + "</td>";
+    emailBody = emailBody + "<td style='padding: 8px;'>" + contactInfo + "</td>";
+    emailBody = emailBody + "<td style='padding: 8px; text-align: center;'><a href='" + excludeUrl + "' style='background: #c62828; color: #fff; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: bold;'>Exclude</a></td>";
+    emailBody = emailBody + "</tr>";
+
+    rowIndex = rowIndex + 1;
+}
+
+emailBody = emailBody + "</table>";
+emailBody = emailBody + "<p style='font-size: 12px; color: #666; margin-top: 16px;'>No action needed for postcards to send. Anything not excluded by 8 AM Tuesday will be mailed automatically.</p>";
+emailBody = emailBody + "</body></html>";
+
+sendmail
+[
+    from: zoho.adminuserid
+    to: config.Preview_Recipients
+    subject: "Permit Miner Preview: " + totalQueued + " postcards queued for tomorrow"
+    message: emailBody
+    content_type: "text/html"
+];
+
+// --- SEND ERROR ALERT IF NEEDED ---
+if (apiErrors > 0)
+{
+    sendmail
+    [
+        from: zoho.adminuserid
+        to: config.Alert_Recipients
+        subject: "Permit Miner: API errors on " + apiErrors + " ZIP code(s)"
+        message: "The Monday pull encountered API errors on " + apiErrors + " of " + zipList.size() + " ZIP codes. " + queuedCount + " permits were still queued successfully. Check Shovels API status and review logs."
+        content_type: "text/html"
+    ];
+}
