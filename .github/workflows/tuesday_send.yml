@@ -1,0 +1,58 @@
+name: Tuesday Send
+
+on:
+  schedule:
+    - cron: '0 13 * * 2'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Tuesday send
+        env:
+          APOLLO_API_KEY:         ${{ secrets.APOLLO_API_KEY }}
+          PERMIT_MINER_API_KEY:   ${{ secrets.PERMIT_MINER_API_KEY }}
+          LOB_LIVE_KEY:           ${{ secrets.LOB_LIVE_KEY }}
+          LOB_TEST_KEY:           ${{ secrets.LOB_TEST_KEY }}
+          SMTP_HOST:              ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:              ${{ secrets.SMTP_PORT }}
+          SMTP_USER:              ${{ secrets.SMTP_USER }}
+          SMTP_PASS:              ${{ secrets.SMTP_PASS }}
+          PREVIEW_RECIPIENTS:     ${{ secrets.PREVIEW_RECIPIENTS }}
+          DIGEST_RECIPIENTS:      ${{ secrets.DIGEST_RECIPIENTS }}
+          ALERT_RECIPIENTS:       ${{ secrets.ALERT_RECIPIENTS }}
+          RETURN_NAME:            ${{ secrets.RETURN_NAME }}
+          RETURN_ADDRESS:         ${{ secrets.RETURN_ADDRESS }}
+          RETURN_CITY:            ${{ secrets.RETURN_CITY }}
+          RETURN_STATE:           ${{ secrets.RETURN_STATE }}
+          RETURN_ZIP:             ${{ secrets.RETURN_ZIP }}
+          PURL_BASE_URL:          ${{ secrets.PURL_BASE_URL }}
+          LOB_TEMPLATE_FRONT_ID:  ${{ secrets.LOB_TEMPLATE_FRONT_ID }}
+          LOB_TEMPLATE_BACK_ID:   ${{ secrets.LOB_TEMPLATE_BACK_ID }}
+          LOB_DRIP_TEMPLATE_FRONT_ID: ${{ secrets.LOB_DRIP_TEMPLATE_FRONT_ID }}
+          LOB_DRIP_TEMPLATE_BACK_ID:  ${{ secrets.LOB_DRIP_TEMPLATE_BACK_ID }}
+          MODE:                   ${{ secrets.MODE }}
+          DB_PATH:                permit_miner.db
+        run: python -m pipeline.tuesday_send
+
+      - name: Commit updated DB and registry
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add permit_miner.db data/permit_registry.json
+          git diff --staged --quiet || git commit -m "Tuesday send $(date -u +%Y-%m-%d)"
+          git push

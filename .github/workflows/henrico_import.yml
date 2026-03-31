@@ -1,0 +1,46 @@
+name: Henrico Import
+
+on:
+  schedule:
+    # 5th of each month, 8 AM ET
+    - cron: '0 13 5 * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Henrico import
+        env:
+          APOLLO_API_KEY:       ${{ secrets.APOLLO_API_KEY }}
+          PERMIT_MINER_API_KEY: ${{ secrets.PERMIT_MINER_API_KEY }}
+          SMTP_HOST:            ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:            ${{ secrets.SMTP_PORT }}
+          SMTP_USER:            ${{ secrets.SMTP_USER }}
+          SMTP_PASS:            ${{ secrets.SMTP_PASS }}
+          PREVIEW_RECIPIENTS:   ${{ secrets.PREVIEW_RECIPIENTS }}
+          PURL_BASE_URL:        ${{ secrets.PURL_BASE_URL }}
+          MODE:                 ${{ secrets.MODE }}
+          DB_PATH:              permit_miner.db
+        run: python -m pipeline.henrico_import
+
+      - name: Commit updated DB
+        run: |
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
+          git add permit_miner.db
+          git diff --staged --quiet || git commit -m "Henrico import $(date -u +%Y-%m-%d)"
+          git push

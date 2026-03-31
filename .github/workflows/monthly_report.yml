@@ -1,0 +1,34 @@
+name: Monthly Report
+
+on:
+  schedule:
+    # 1st of each month, 9 AM ET (14:00 UTC)
+    - cron: '0 14 1 * *'
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run monthly report
+        env:
+          SMTP_HOST:            ${{ secrets.SMTP_HOST }}
+          SMTP_PORT:            ${{ secrets.SMTP_PORT }}
+          SMTP_USER:            ${{ secrets.SMTP_USER }}
+          SMTP_PASS:            ${{ secrets.SMTP_PASS }}
+          PREVIEW_RECIPIENTS:   ${{ secrets.PREVIEW_RECIPIENTS }}
+          DIGEST_RECIPIENTS:    ${{ secrets.DIGEST_RECIPIENTS }}
+          MODE:                 ${{ secrets.MODE }}
+          DB_PATH:              permit_miner.db
+        run: python -m pipeline.monthly_report
