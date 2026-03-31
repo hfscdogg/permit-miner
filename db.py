@@ -325,3 +325,47 @@ def set_app_config_field(field: str, value: str, customer_id: str = "livewire"):
             f"UPDATE app_config SET {field}=? WHERE customer_id=?",
             (value, customer_id),
         )
+
+
+# ── JSON data file helpers ─────────────────────────────────────────────────────
+# These files live in data/ and are committed to the repo.
+# WordPress writes exclusions.json and scans.json; GitHub Actions reads them.
+
+import json as _json
+import os as _os
+
+DATA_DIR = _os.path.join(_os.path.dirname(__file__), "data")
+
+
+def _data_path(filename: str) -> str:
+    return _os.path.join(DATA_DIR, filename)
+
+
+def read_scans() -> list[dict]:
+    """Return list of {pid, timestamp} scan events written by WordPress."""
+    path = _data_path("scans.json")
+    try:
+        with open(path) as f:
+            data = _json.load(f)
+            return data if isinstance(data, list) else []
+    except (FileNotFoundError, _json.JSONDecodeError):
+        return []
+
+
+def read_exclusions() -> list[dict]:
+    """Return list of {pid, reason, timestamp} exclusion events written by WordPress."""
+    path = _data_path("exclusions.json")
+    try:
+        with open(path) as f:
+            data = _json.load(f)
+            return data if isinstance(data, list) else []
+    except (FileNotFoundError, _json.JSONDecodeError):
+        return []
+
+
+def write_registry(registry: dict):
+    """Write permit registry {pid: {owner_name, phone, address, permit_type}} to data/."""
+    path = _data_path("permit_registry.json")
+    _os.makedirs(DATA_DIR, exist_ok=True)
+    with open(path, "w") as f:
+        _json.dump(registry, f, indent=2)
