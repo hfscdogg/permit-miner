@@ -33,7 +33,7 @@ Create these sections top to bottom:
 
 **Section 3: CTA**
 - Primary button: "Book a Complimentary Consultation"
-  - Link to Zoho Bookings URL: `https://livewire.zohobookings.com/#/customer/[your-booking-page]`
+  - Link to your booking page URL (Calendly, Zoho Bookings, or similar)
   - Style: Orange background (`#e8943a`), white text, large padding
 - Secondary: "Call Us" button
   - Link: `tel:8049379001`
@@ -80,14 +80,24 @@ add_action('wp_enqueue_scripts', 'permit_miner_purl_script');
 
 ### 4. Update the Webhook URL
 
-In `purl_script.js`, update the `WEBHOOK_URL` variable to match the actual Zoho Creator REST API endpoint URL after the Creator function is deployed.
+In `purl_script.js`, update `WEBHOOK_URL` to point at your deployed FastAPI server:
 
-The format is typically:
-```
-https://creatorapp.zoho.com/api/v2/[owner]/permit-miner/report/Scan_Webhook
+```javascript
+var WEBHOOK_URL = 'https://your-server.example.com/scan';
 ```
 
-### 5. Configure Google Analytics UTM Tracking
+The FastAPI `/scan` endpoint accepts `GET /scan?pid={id}` and returns JSON with `permit_type` so the page can swap content.
+
+### 5. CORS
+
+The FastAPI server must allow cross-origin requests from `getlivewire.com`. FastAPI's default CORS is permissive for GET requests, but if you see CORS errors add this to `web/app.py`:
+
+```python
+from fastapi.middleware.cors import CORSMiddleware
+app.add_middleware(CORSMiddleware, allow_origins=["https://getlivewire.com"], allow_methods=["GET"])
+```
+
+### 6. Configure Google Analytics UTM Tracking
 
 The postcard QR URLs include UTM parameters:
 - `utm_source=permit_miner`
@@ -101,20 +111,19 @@ To view in GA:
 - Acquisition > Campaigns > All Campaigns > "luxury_permits"
 - Or create a custom segment filtering on utm_source = "permit_miner"
 
-### 6. Test
+### 7. Test
 
-1. Open `getlivewire.com/welcome?pid=test123` in a browser
-2. Verify the page loads with default content
-3. Check browser console for any JS errors
-4. Once the Zoho Creator webhook is live, test with a real permit record ID
+1. Start FastAPI locally: `./run.sh`
+2. Open `getlivewire.com/welcome?pid=test123` in a browser
+3. Verify the page loads with default content (no JS errors)
+4. Insert a real permit ID into the DB (via `python -m pipeline.monday_pull`) and test with that ID
 5. Verify:
-   - Page headline changes based on permit type returned
-   - Zoho Creator record updates to "Engaged"
+   - Page headline changes based on permit type returned from `/scan`
+   - DB record updates to `Engaged`
    - Sales team receives scan alert email
 
 ### Important Notes
 
-- The page should work fine without a `pid` parameter (shows default content, no webhook fires)
-- The webhook call is fire-and-forget from the browser's perspective — page content shows immediately, the webhook fires in the background
-- CORS: The Zoho Creator REST API function must allow cross-origin requests from getlivewire.com. Configure this in Creator's API settings.
+- The page works fine without a `pid` parameter — shows default content, no scan call fires
+- The scan call is fire-and-forget from the browser — page content shows immediately
 - Mobile: Test on iPhone since most QR scans will come from mobile cameras
