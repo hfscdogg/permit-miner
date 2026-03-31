@@ -13,8 +13,8 @@
   'use strict';
 
   // --- CONFIG ---
-  // Update this URL after creating the Zoho Creator REST API function
-  var WEBHOOK_URL = 'https://creatorapp.zoho.com/api/v2/livewire/permit-miner/report/Scan_Webhook';
+  // Update this to the BASE_URL of your deployed FastAPI server
+  var WEBHOOK_URL = 'https://your-server.example.com/scan';
 
   // --- READ PID FROM URL ---
   var params = new URLSearchParams(window.location.search);

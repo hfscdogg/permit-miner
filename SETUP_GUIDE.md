@@ -1,172 +1,223 @@
-# Permit Miner: Setup Guide for Cowork / Zoho Developer
+# Permit Miner — Setup Guide
+
+Standalone Python/SQLite stack. No Zoho. No n8n.
+
+---
 
 ## Prerequisites
 
-Before starting the build, Henry must complete these items:
-
-- [ ] Shovels API key obtained and tested (DONE)
-- [ ] Lob production + test API keys obtained (DONE)
-- [ ] Zoho Creator admin access available
-- [ ] WordPress admin access to getlivewire.com (grant to Cowork)
-- [ ] Zoho CRM admin access for custom fields
-
----
-
-## Step 1: Create Zoho Creator Application
-
-1. Log into Zoho Creator as admin
-2. Create new application: **"Permit Miner"**
-3. Set application link name to `permit-miner`
-
-## Step 2: Create Tables
-
-Create these three tables using the schemas in `/schemas/`:
-
-### Table 1: Permit_Miner_Config
-- See `schemas/permit_miner_config.md` for complete field list
-- Create a **subform** called `Lob_Templates` within this table for template management
-- After creating the table, insert the initial Livewire config record (values listed at the bottom of the schema doc)
-- Store API keys securely (Shovels key, Lob live key, Lob test key)
-
-### Table 2: Permit_Miner_Leads
-- See `schemas/permit_miner_leads.md` for complete field list
-- This is the largest table (~35 fields)
-- Set `Property_Address` as the dedup reference field
-- Set `Status` picklist values: Queued, Excluded, Sent, Engaged, Consultation Scheduled, Converted, Drip Queued, Drip Sent, Lob Error
-
-### Table 3: Permit_Miner_Exclusion_Rules
-- See `schemas/permit_miner_exclusion_rules.md` for complete field list
-- Set `Rule_Type` picklist values: Contractor, Keyword, Address, Owner_Name
-
-## Step 3: Create the Exclusion Form
-
-1. Create a new form called **Exclude_Permit** in the Permit Miner app
-2. Accept URL parameter: `record_id` (pre-populates the form)
-3. Fields:
-   - Record ID (hidden, pre-filled from URL)
-   - Exclude_Reason (radio buttons): Wrong contractor, Not luxury / too low-end, Commercial / not residential, Existing customer, Bad address / incomplete data, Custom
-   - Custom_Reason (text field, shown only when "Custom" is selected)
-4. On form submit: trigger `exclude_handler.ds` function
-
-## Step 4: Deploy Deluge Functions
-
-Create these functions in Zoho Creator. Copy code from the `/deluge/` directory.
-
-### Scheduled Functions
-
-| Function | File | Schedule | Notes |
-|----------|------|----------|-------|
-| Monday Pull + Preview | `monday_pull.ds` | Every Monday, 8:00 AM ET | Main pipeline. Largest function. |
-| Tuesday Auto-Send | `tuesday_send.ds` | Every Tuesday, 8:00 AM ET | Lob + CRM integration |
-| Henrico Import | `henrico_import.ds` | 5th of each month, 8:00 AM ET | Phase 1b |
-| Monthly Report | `monthly_report.ds` | 1st of each month, 9:00 AM ET | Analytics |
-
-### Form Action Functions
-
-| Function | File | Trigger |
-|----------|------|---------|
-| Exclude Handler | `exclude_handler.ds` | On submit of Exclude_Permit form |
-
-### REST API Functions (Custom API)
-
-| Function | File | Endpoint | Auth |
-|----------|------|----------|------|
-| Scan Webhook | `scan_webhook.ds` | GET /scan?pid={id} | Public (no auth required) |
-| Booking Webhook | `booking_webhook.ds` | POST /booking | Zoho Bookings webhook |
-
-**For the Scan Webhook:** Configure it to accept unauthenticated requests (CORS enabled for getlivewire.com). This endpoint only updates scan data and is not sensitive.
-
-## Step 5: Zoho CRM Custom Fields
-
-See `schemas/zoho_crm_fields.md` for the complete list.
-
-1. Go to Zoho CRM > Settings > Modules > Leads > Fields
-2. Create all 15 custom fields listed in the schema
-3. Add "Permit Miner" to the Lead Source picklist
-4. Add "Postcard Sent", "Engaged", "Consultation Scheduled" to Lead Status picklist
-
-## Step 6: Lob Account Setup
-
-1. Log into lob.com
-2. Note the test API key and live API key
-3. Build the postcard template:
-   - Use the HTML from `lob/postcard_front.html` and `lob/postcard_back.html`
-   - Upload as a 6x11 postcard template
-   - Replace the Livewire logo placeholder with the actual hosted logo URL
-   - Replace the lifestyle image placeholder on the front
-   - Test with Lob's template preview tool to verify safe area
-4. Note the template IDs and add them to the Permit_Miner_Config Lob_Templates subform
-5. Send one test postcard to Henry's address using the test API key
-
-## Step 7: PURL Landing Page (WordPress)
-
-Follow the instructions in `purl/elementor_setup.md`.
-
-Summary:
-1. Create page at getlivewire.com/welcome
-2. Build with Elementor (full-width template)
-3. Add sections: Hero, Personalized Content, CTA, Social Proof, Footer
-4. Set element IDs: `purl-headline`, `purl-subheadline`, `purl-body`, `purl-personalized`
-5. Add `purl/purl_script.js` via HTML widget or Code Snippets plugin
-6. Update the `WEBHOOK_URL` in the script to match the actual Zoho Creator endpoint
-7. Test with `getlivewire.com/welcome?pid=test123`
-
-## Step 8: Zoho Bookings Integration
-
-1. In Zoho Bookings, create a booking type: "Complimentary Smart Home Consultation"
-2. Configure a webhook on booking confirmation that POSTs to the `booking_webhook.ds` endpoint
-3. Include these fields in the webhook payload: customer_email, customer_phone, customer_name, booking_date, booking_time
-4. Optional: pass `pid` through the booking URL if the PURL page appends it
-
-## Step 9: Google Analytics
-
-1. Verify GA tracking code is active on getlivewire.com
-2. UTM parameters are embedded in the PURL URLs automatically
-3. No additional GA setup needed — the UTMs flow through standard campaign tracking
-4. To view: Acquisition > Campaigns > filter for "luxury_permits"
-
-## Step 10: Initial Config Record
-
-Verify the Livewire config record has all values populated:
-- All 11 ZIP codes entered
-- $500,000 assessed value threshold
-- All qualifying tags listed
-- Preview email: henry@getlivewire.com
-- Sales digest: henry@getlivewire.com, sales@getlivewire.com
-- Alert recipients: henry@getlivewire.com
-- Return address: Livewire, 4900 W Clay St, Richmond VA 23230
-- Mode: "test" (switch to "live" after validation)
-- Drip: disabled (enable after first-touch performance is validated)
-
-## Step 11: End-to-End Testing
-
-Follow the 18-step test protocol in `TEST_PROTOCOL.md`.
-
-Key sequence:
-1. Set Mode = "test" in config
-2. Manually trigger Monday Pull for one ZIP code (23226)
-3. Verify preview email arrives
-4. Click Exclude on one record
-5. Manually trigger Tuesday Send
-6. Check Lob dashboard for test postcard
-7. Check CRM for new leads
-8. Wait for postcard delivery (3-5 days)
-9. Scan QR code
-10. Verify full loop: Creator update → CRM update → scan alert → booking test
-
-## Step 12: Go Live
-
-1. Switch Mode to "live" in config
-2. Verify all 11 ZIP codes are in the config
-3. Let the Monday schedule run naturally
-4. Monitor the first 2-3 weeks closely
-5. After 8-12 weeks of baseline data, consider enabling drip
+- Python 3.11+
+- A server or VPS reachable from the internet (for Exclude buttons + PURL scan tracking)
+- Shovels API key (obtain from shovels.ai)
+- Lob account with API keys (lob.com) — postcard templates uploaded (see Step 5)
+- SMTP credentials for outbound email (Gmail App Password works)
+- WordPress site at getlivewire.com for the PURL landing page
 
 ---
 
-## Important Notes
+## Step 1 — Clone repo and install dependencies
 
-- **Zoho invokeurl limits:** Zoho Creator has daily API call limits. Monitor usage during the first few weeks. With 11 ZIPs + pagination + resident lookups + contractor lookups, a single Monday run could consume 500-1000+ API calls.
-- **Scheduled function timeout:** Zoho Creator functions have a 10-minute execution timeout. If the Monday Pull takes longer than this, split it into batches (e.g., 5 ZIPs per run, two runs per Monday).
-- **Lob test vs live:** ALWAYS test with Lob's test key first. Test postcards don't actually print or mail.
-- **Shovels data refresh:** Data updates on the 1st and 15th of each month. Monday pulls will always have fresh data.
+```bash
+git clone <repo-url> permit-miner
+cd permit-miner
+python -m venv venv
+source venv/bin/activate          # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+---
+
+## Step 2 — Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and fill in all values:
+
+| Variable | Description |
+|---|---|
+| `SHOVELS_API_KEY` | From shovels.ai dashboard |
+| `LOB_LIVE_KEY` / `LOB_TEST_KEY` | From lob.com dashboard |
+| `SMTP_HOST/PORT/USER/PASS` | Outbound email credentials |
+| `PREVIEW_RECIPIENTS` | Monday preview email — Henry's address |
+| `DIGEST_RECIPIENTS` | Tuesday digest — Henry + sales |
+| `ALERT_RECIPIENTS` | QR scan alerts |
+| `RETURN_*` | Livewire return address for postcards |
+| `BASE_URL` | Public URL of the FastAPI server (e.g. `https://permits.getlivewire.com`) |
+| `PURL_BASE_URL` | `https://getlivewire.com/welcome` |
+| `LOB_TEMPLATE_FRONT_ID` / `LOB_TEMPLATE_BACK_ID` | After Step 5 |
+| `MODE` | `test` while validating, `live` for production |
+
+---
+
+## Step 3 — Initialize the database
+
+```bash
+python -c "import db; db.init_db(); print('DB initialized.')"
+```
+
+This creates `permit_miner.db` with all tables.
+
+---
+
+## Step 4 — Deploy the web server
+
+The FastAPI server must be publicly reachable so Exclude button links
+in emails work and so `purl_script.js` can call `/scan`.
+
+**Option A — Railway (recommended, free tier)**
+1. Push repo to GitHub
+2. Connect repo to Railway → New Project → Deploy from GitHub
+3. Set environment variables in Railway dashboard
+4. Note the public URL — set as `BASE_URL` in `.env`
+
+**Option B — Any Linux VPS ($5/mo Linode/DigitalOcean)**
+```bash
+# On server:
+git clone <repo> permit-miner && cd permit-miner
+pip install -r requirements.txt
+cp .env.example .env  # fill in values
+chmod +x run.sh
+./run.sh
+```
+Point a subdomain (e.g. `permits.getlivewire.com`) at the server IP.
+Use nginx as a reverse proxy with SSL (certbot).
+
+**Option C — Local + ngrok (testing only)**
+```bash
+ngrok http 8000
+# Copy the https URL → set as BASE_URL in .env
+./run.sh
+```
+
+---
+
+## Step 5 — Upload Lob postcard templates
+
+1. Log in to lob.com → Templates
+2. Create template → upload `lob/postcard_front.html` → note Template ID → set as `LOB_TEMPLATE_FRONT_ID`
+3. Create template → upload `lob/postcard_back.html` → note Template ID → set as `LOB_TEMPLATE_BACK_ID`
+4. (Optional) Create drip variants and set `LOB_DRIP_TEMPLATE_FRONT_ID` / `LOB_DRIP_TEMPLATE_BACK_ID`
+5. Order a proof → confirm 6x11 size and merge variables render correctly
+
+---
+
+## Step 6 — Set up WordPress PURL page
+
+See `purl/elementor_setup.md` for full instructions. Summary:
+
+1. Create page at `/welcome` in WordPress
+2. Build Elementor sections with IDs: `purl-headline`, `purl-subheadline`, `purl-body`, `purl-personalized`
+3. Add `purl/purl_script.js` via Custom HTML widget or Code Snippets plugin
+4. Update `WEBHOOK_URL` in the script to `{BASE_URL}/scan`
+5. Test: visit `getlivewire.com/welcome?pid=test123` — confirm no JS errors
+
+---
+
+## Step 7 — Set up cron jobs
+
+On your server (or Railway cron, GitHub Actions, etc.):
+
+```bash
+# Edit crontab: crontab -e
+# Set timezone: TZ=America/New_York
+
+# Monday 8:00 AM ET — Shovels pull + preview email
+0 8 * * 1  cd /path/to/permit-miner && /path/to/venv/bin/python -m pipeline.monday_pull >> logs/monday.log 2>&1
+
+# Tuesday 8:00 AM ET — Lob send + digest email
+0 8 * * 2  cd /path/to/permit-miner && /path/to/venv/bin/python -m pipeline.tuesday_send >> logs/tuesday.log 2>&1
+
+# 5th of each month, 8:00 AM ET — Henrico County import
+0 8 5 * *  cd /path/to/permit-miner && /path/to/venv/bin/python -m pipeline.henrico_import >> logs/henrico.log 2>&1
+
+# 1st of each month, 9:00 AM ET — Monthly learning report
+0 9 1 * *  cd /path/to/permit-miner && /path/to/venv/bin/python -m pipeline.monthly_report >> logs/monthly.log 2>&1
+```
+
+Create the `logs/` directory:
+```bash
+mkdir -p logs
+```
+
+---
+
+## Step 8 — (Optional) Consultation booking webhook
+
+If using Zoho Bookings, Calendly, or similar:
+
+- Set webhook URL to: `{BASE_URL}/booking`
+- Method: `POST`
+- Payload should include `pid`, `email`, and/or `phone`
+
+Permits matched by any of those fields will be updated to `Consultation Scheduled`.
+
+---
+
+## Step 9 — Test run (dry run)
+
+With `MODE=test` in `.env`:
+
+```bash
+# Manual Monday pull
+python -m pipeline.monday_pull
+
+# Check DB
+python -c "import sqlite3; conn = sqlite3.connect('permit_miner.db'); print(conn.execute('SELECT COUNT(*) FROM permits').fetchone())"
+
+# Manual Tuesday send (test mode — Lob won't print)
+python -m pipeline.tuesday_send
+
+# Test exclude endpoint
+curl http://localhost:8000/exclude?pid=<id_from_db>
+
+# Test scan endpoint
+curl http://localhost:8000/scan?pid=<id_from_db>
+
+# Health check
+curl http://localhost:8000/health
+```
+
+---
+
+## Step 10 — Go live
+
+1. Set `MODE=live` in `.env`
+2. Confirm `LOB_LIVE_KEY` is set
+3. Run `python -m pipeline.monday_pull` on a Monday
+4. Check preview email arrives with real permits and working Exclude buttons
+5. Click an Exclude button — confirm form loads and status updates in DB
+6. Tuesday: confirm digest email arrives and postcards show in Lob dashboard
+
+---
+
+## File structure
+
+```
+permit-miner/
+  config.py               # Static config (ZIP codes, thresholds, tags)
+  db.py                   # SQLite schema + helpers
+  .env.example            # Environment variable template
+  requirements.txt        # Python dependencies
+  run.sh                  # Start web server
+  pipeline/
+    monday_pull.py        # Shovels pull + filter + enrich + preview email
+    tuesday_send.py       # Lob send + sales digest
+    henrico_import.py     # Monthly Henrico County Excel import
+    monthly_report.py     # Monthly learning report
+    mailer.py             # Shared SMTP email sender
+  web/
+    app.py                # FastAPI: /exclude, /scan, /booking, /health
+    templates/
+      exclude_form.html   # Exclude reason form
+  lob/
+    postcard_front.html   # 6x11 Lob front template
+    postcard_back.html    # 6x11 Lob back template
+  purl/
+    purl_script.js        # WordPress PURL page JS
+    elementor_setup.md    # WordPress/Elementor setup guide
+  SETUP_GUIDE.md          # This file
+  SPRINT_PLAN.md          # Build sprint sequence
+  TEST_PROTOCOL.md        # 18-step validation checklist
+```

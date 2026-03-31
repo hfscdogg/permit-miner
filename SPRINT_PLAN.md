@@ -1,140 +1,74 @@
-# Permit Miner: Sprint Plan
+# Permit Miner — Sprint Plan
 
-Estimated total: 10 working days to live, plus Day 11 for Henrico import.
-
----
-
-## Sprint 1: Core Data Pipeline (Days 1-2)
-
-### Day 1
-- [ ] Create Zoho Creator app "Permit Miner"
-- [ ] Create Permit_Miner_Config table with all fields (see schema)
-- [ ] Create Permit_Miner_Config Lob_Templates subform
-- [ ] Create Permit_Miner_Leads table with all fields (see schema)
-- [ ] Create Permit_Miner_Exclusion_Rules table with all fields
-- [ ] Insert initial Livewire config record with API keys and ZIP codes
-- [ ] Create Exclude_Permit form with predefined reasons
-
-### Day 2
-- [ ] Deploy `monday_pull.ds` as scheduled function (Monday 8:00 AM ET)
-- [ ] Deploy `exclude_handler.ds` as form action
-- [ ] Test: manually trigger Monday Pull for ZIP 23226 only
-- [ ] Verify: permits saved to Leads table with correct field mapping
-- [ ] Verify: dedup works (run again, no duplicates)
-- [ ] Verify: owner_type filter (no company_owned records)
-- [ ] Verify: new construction bypass (low-value new builds still qualify)
-- [ ] Verify: preview email sends with Exclude buttons
-- [ ] Test: click Exclude button, verify form works and status updates
+Estimated: 4–5 days to live (code is already written — this is setup + validation).
 
 ---
 
-## Sprint 2: Lob + CRM Integration (Day 3)
+## Day 1 — Environment + Infrastructure
 
-- [ ] Build 6x11 Lob HTML postcard template from `lob/postcard_front.html` and `lob/postcard_back.html`
-- [ ] Upload Livewire logo and lifestyle image to hosted URLs
-- [ ] Upload template to Lob, get template IDs
-- [ ] Add template IDs to config Lob_Templates subform
-- [ ] Deploy `tuesday_send.ds` as scheduled function (Tuesday 8:00 AM ET)
-- [ ] Create 15 custom fields in Zoho CRM Leads module (see schema)
-- [ ] Add "Permit Miner" to Lead Source picklist
-- [ ] Add status values to Lead Status picklist
-- [ ] Test: manually trigger Tuesday Send in test mode
-- [ ] Verify: Lob test postcard created (check Lob dashboard)
-- [ ] Verify: CRM Lead created with all custom fields populated
-- [ ] Verify: sales digest email sends with correct data
-- [ ] Verify: contact enrichment data (phone/email) present where available
+- [ ] Clone repo, create virtualenv, `pip install -r requirements.txt`
+- [ ] Copy `.env.example` → `.env`, fill in all API keys and SMTP credentials
+- [ ] `python -c "import db; db.init_db()"` — confirm DB creates cleanly
+- [ ] Deploy FastAPI server (Railway recommended) — note public URL
+- [ ] Set `BASE_URL` in `.env`
+- [ ] `curl {BASE_URL}/health` — confirm `{"status":"ok","mode":"test"}`
 
----
+## Day 2 — Lob Templates + PURL Page
 
-## Sprint 3: PURL + Tracking (Day 4)
+- [ ] Upload `lob/postcard_front.html` and `postcard_back.html` to lob.com
+- [ ] Note Template IDs → set in `.env`
+- [ ] Order a Lob proof — check 6x11 layout, merge variable rendering, QR code
+- [ ] Create `/welcome` page in WordPress per `purl/elementor_setup.md`
+- [ ] Update `WEBHOOK_URL` in `purl/purl_script.js` to `{BASE_URL}/scan`
+- [ ] Test: `getlivewire.com/welcome?pid=test123` — no JS errors, page loads
 
-- [ ] Build WordPress page at getlivewire.com/welcome with Elementor
-- [ ] Set up dynamic content sections with correct element IDs
-- [ ] Add `purl_script.js` to the page
-- [ ] Deploy `scan_webhook.ds` as REST API function
-- [ ] Configure CORS for getlivewire.com domain
-- [ ] Set up Google Analytics UTM tracking (verify existing GA code)
-- [ ] Deploy `booking_webhook.ds`
-- [ ] Configure Zoho Bookings webhook
-- [ ] Test: visit PURL with test pid, verify webhook fires
-- [ ] Verify: Creator record updates to "Engaged"
-- [ ] Verify: CRM Lead updates with scan date
-- [ ] Verify: scan alert email received by sales team
-- [ ] Build scan alert email (design matches `emails/scan_alert.html`)
+## Day 3 — Monday Pipeline Validation
 
----
+- [ ] Run `python -m pipeline.monday_pull` with `MODE=test`
+- [ ] Confirm preview email arrives with permit table
+- [ ] Confirm Exclude button links to `{BASE_URL}/exclude?pid=...`
+- [ ] Click Exclude button — confirm form renders with permit address pre-filled
+- [ ] Submit exclude form — confirm status changes to `Excluded` in DB
+- [ ] Confirm exclusion rules created (address blocklisted, contractor incremented)
 
-## Sprint 4: Settings, Dashboard, Error Handling (Day 5)
+## Day 4 — Tuesday Pipeline Validation
 
-- [ ] Build Zoho Creator settings form (friendly UI on top of config table)
-  - [ ] ZIP code tag-style multi-select
-  - [ ] Value threshold sliders by permit type
-  - [ ] Permit category checkboxes
-  - [ ] Postcard template dropdown
-  - [ ] Email recipient inputs
-  - [ ] Exclusion rules table with Active toggle
-  - [ ] Drip toggle and delay days
-- [ ] Build Zoho Creator performance dashboard
-  - [ ] Weekly summary widget
-  - [ ] Scan rate chart
-  - [ ] Exclusion trends
-  - [ ] Pipeline by permit type
-- [ ] Implement all error handling scenarios from spec
-- [ ] Send test postcard to Henry's physical address
+- [ ] Add a test permit manually to DB with status `Queued`
+- [ ] Run `python -m pipeline.tuesday_send` with `MODE=test`
+- [ ] Confirm digest email arrives with permit listed
+- [ ] Confirm DB status updated to `Sent`
+- [ ] Run `python -m pipeline.monday_pull` again — confirm dedup skips seen addresses
+- [ ] Test `/scan?pid={id}` — confirm status → `Engaged`, scan alert email fires
 
----
+## Day 5 — Go Live
 
-## Sprint 5: Polish + Wait for Test Postcard (Days 6-8)
+- [ ] Set `MODE=live` in `.env`
+- [ ] Run Monday pull — confirm real permits in DB and preview email
+- [ ] Review preview email — exclude any non-qualifying records
+- [ ] Run Tuesday send — confirm postcards appear in Lob dashboard
+- [ ] Confirm digest email with sent permits
+- [ ] Wait for postcard to arrive (3–5 business days) — scan QR code, confirm scan alert fires and PURL page loads with correct content variant
 
-- [ ] Refine exclusion form UX (one-tap reason selection from email)
-- [ ] Test preview email Exclude buttons across email clients (Gmail, Apple Mail, Outlook)
-- [ ] Verify CRM field mapping is correct on 5+ test records
-- [ ] Test contact enrichment across multiple ZIP codes
-- [ ] Review and refine email templates (preview + digest + scan alert)
-- [ ] Document any Deluge quirks or workarounds discovered during testing
-- [ ] Wait for test postcard physical delivery (3-5 business days)
+## Day 6 (optional) — Henrico Import
+
+- [ ] Run `python -m pipeline.henrico_import`
+- [ ] Confirm Henrico permits (ZIPs 23229/23233/23238) inserted with `source='Henrico Direct'`
+- [ ] These flow into Tuesday send automatically
+
+## Day 7 (optional) — Monthly Report
+
+- [ ] Run `python -m pipeline.monthly_report`
+- [ ] Confirm report email with funnel metrics, exclusion reasons, ZIP performance
 
 ---
 
-## Sprint 6: End-to-End Validation (Days 8-9)
+## Scheduling (after go-live)
 
-Run the full 18-step test protocol (see `TEST_PROTOCOL.md`):
+```
+Monday    8:00 AM ET   python -m pipeline.monday_pull
+Tuesday   8:00 AM ET   python -m pipeline.tuesday_send
+5th/month 8:00 AM ET   python -m pipeline.henrico_import
+1st/month 9:00 AM ET   python -m pipeline.monthly_report
+```
 
-- [ ] Monday morning tests (#1-6): preview email, data quality, Exclude button
-- [ ] Tuesday morning tests (#7-12): Lob send, CRM leads, digest, excluded records
-- [ ] Postcard arrival tests (#13-18): print quality, QR scan, PURL, CRM update, scan alert, booking test
-
-**All 18 tests must pass before going live.**
-
----
-
-## GO LIVE: Day 10
-
-- [ ] Switch config Mode from "test" to "live"
-- [ ] Verify all 11 ZIP codes active
-- [ ] Let Monday scheduled function run on its natural schedule
-- [ ] Monitor first real preview email
-- [ ] Monitor first real Tuesday send
-- [ ] Verify first batch of real postcards in Lob dashboard
-- [ ] Watch for first real QR scans over the following week
-
----
-
-## Phase 1b: Henrico County Import (Day 11)
-
-- [ ] Deploy `henrico_import.ds` as scheduled function (5th of month, 8:00 AM ET)
-- [ ] Run first import manually using most recent available Henrico data
-- [ ] Verify Henrico records inserted with Source = "Henrico Direct"
-- [ ] Verify Henrico records appear in Monday preview email
-- [ ] Confirm downstream flow (Lob send, CRM lead) works for Henrico records
-
----
-
-## Phase 2: Post-Launch (After 4-6 Weeks)
-
-- [ ] Brian refines postcard creative (front + back)
-- [ ] Brian refines PURL landing page design
-- [ ] Enable multi-touch drip (set Drip_Enabled = true, monitor results)
-- [ ] Deploy `monthly_report.ds` and verify first report
-- [ ] Consider A/B test setup (add second template to Lob_Templates subform)
-- [ ] Begin onboarding first IntegrateU beta customer (Phase 2 productization)
+All logs go to `logs/` directory.

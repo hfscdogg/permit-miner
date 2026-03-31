@@ -1,63 +1,138 @@
-# Permit Miner: Week 1 Test Protocol
+# Permit Miner — Test Protocol
 
-Run this checklist after Sprint 4 is complete. Every item must pass before going live.
-
----
-
-## Monday Morning Tests
-
-| # | Test | How to Verify | Pass/Fail |
-|---|------|---------------|-----------|
-| 1 | Preview email received | Check Henry's inbox by 8:30 AM ET. Email has "Permit Miner Preview" subject line with formatted permit table. | |
-| 2 | Permit count is reasonable | Between 1-30 permits for 11 ZIP codes is expected for a weekly pull. Zero = possible API issue. Thousands = filter not working. | |
-| 3 | No LLC/trust records | Every record in the preview shows property_owner_type = "individual". Zero entity-owned permits. | |
-| 4 | New construction bypass works | If any new construction permits exist, they appear even if assessed value is low or $0. Look for the "NEW CONSTRUCTION" label. | |
-| 5 | Exclude button works on mobile | Open preview email on iPhone. Tap Exclude on one permit. Zoho Creator form opens. Select a reason and submit. | |
-| 6 | Exclusion recorded correctly | In Zoho Creator, check the excluded record: Status = "Excluded", Exclude_Reason populated, Excluded_By shows the email of who clicked. | |
-
-## Tuesday Morning Tests
-
-| # | Test | How to Verify | Pass/Fail |
-|---|------|---------------|-----------|
-| 7 | All non-excluded records changed to "Sent" | In Zoho Creator, query Status = "Queued" for today's batch. Should be zero. Everything either Sent or Excluded. | |
-| 8 | Lob tracking IDs logged | Every Sent record has a Lob_Postcard_ID value. Open a few records and check. | |
-| 9 | Postcards in Lob dashboard | Log into lob.com. Verify matching number of postcards in production/mailed status. Addresses match. | |
-| 10 | CRM Leads created | In Zoho CRM, filter Leads by Lead Source = "Permit Miner". Count matches number of Sent records. All custom fields populated (Permit_Type, Contractor_Name, Assessed_Property_Value, etc.). | |
-| 11 | Sales digest email received | Check inbox. Digest shows all Sent permits with owner name, address, value, contractor, phone, email. Excluded records are NOT in the digest. | |
-| 12 | Excluded record has no CRM Lead | Check the record that was excluded in test #5. It should NOT have a CRM_Lead_ID. No corresponding Lead in CRM. | |
-
-## When Postcard Arrives (3-5 Days Later)
-
-| # | Test | How to Verify | Pass/Fail |
-|---|------|---------------|-----------|
-| 13 | Postcard print quality | Henry receives the test postcard. Verify: print quality is sharp, Livewire branding is correct, colors are accurate, address is correct, no content cut off in bleed area. | |
-| 14 | QR code scans correctly | Open iPhone camera, point at QR code. Verify: PURL landing page opens at getlivewire.com/welcome with the correct permit record ID in the URL. | |
-| 15 | Creator record updated to Engaged | In Zoho Creator, check the permit record. Status should change from "Sent" to "Engaged". First_Scan_Date populated. Scan_Count = 1. | |
-| 16 | CRM Lead updated | In Zoho CRM, check the linked Lead. Lead Status should change to "Engaged". Activity note logged with scan date. QR_First_Scan_Date populated. | |
-| 17 | Scan alert email received | Check inbox for real-time alert: "[Owner Name] at [Address] just scanned their postcard." Includes phone number, CRM link. | |
-| 18 | Consultation booking works | On the PURL page, click "Book a Complimentary Consultation." Complete a test booking in Zoho Bookings. Verify: Creator record updates to "Consultation Scheduled". CRM Lead updates to "Consultation Scheduled" with activity note. | |
+Run this checklist before going live. All 18 items must pass.
 
 ---
 
-## Pass Criteria
+## Section 1 — Monday Morning (6 tests)
 
-**All 18 tests must pass before Sprint 5 begins.**
+**1. Monday pull runs without errors**
+```bash
+python -m pipeline.monday_pull
+# Expected: exits 0, INFO logs show ZIP iteration, final count logged
+```
 
-If any test fails:
-1. Identify the root cause
-2. Fix the specific issue
-3. Re-run ONLY the failed test (and any downstream tests it affects)
-4. Do not proceed to live until all 18 pass
+**2. Preview email arrives and is correctly formatted**
+- Check: email received at `PREVIEW_RECIPIENTS`
+- Check: permit table renders with owner name, address, type, value, contractor
+- Check: NEW BUILD badge appears on new-construction permits
+- Check: no broken HTML
 
-## Common Issues
+**3. Exclude buttons link to correct URL**
+- Click an Exclude button in the preview email
+- Expected: browser opens `{BASE_URL}/exclude?pid={id}`
+- Expected: form renders with permit address shown
 
-| Symptom | Likely Cause | Fix |
-|---------|-------------|-----|
-| No preview email | Scheduled function didn't fire | Check Creator schedule settings. Verify timezone is ET. Manually trigger the function. |
-| Zero permits found | Date range too narrow or API key issue | Check Last_Monday_Run date in config. Verify Shovels API key is valid. Try a wider date range. |
-| All permits filtered out | Value threshold too high or tags too restrictive | Check Min_Assessed_Value in config. Verify Qualifying_Tags includes expected tags. |
-| Exclude button opens wrong form | Form link URL incorrect | Check the Creator form URL pattern in monday_pull.ds. Verify form accepts record_id parameter. |
-| Lob returns errors | Bad address format or template issue | Check Lob error message in the record. Verify template IDs are correct. Test with Lob's address verification tool. |
-| CRM Lead missing fields | Field API names don't match | Compare field API names in tuesday_send.ds against actual CRM field names. Zoho may have added suffixes. |
-| QR scan doesn't update record | Webhook URL incorrect or CORS issue | Check browser console for errors. Verify webhook URL in purl_script.js. Check Creator API CORS settings. |
-| Booking doesn't update record | Bookings webhook not configured | Verify Zoho Bookings has a webhook pointing to booking_webhook.ds endpoint. Check webhook payload fields. |
+**4. Exclude form submits correctly**
+- Select a reason and submit
+- Expected: confirmation page ("Excluded. You can close this tab.")
+- Expected: DB record status = `Excluded`
+
+**5. Exclusion learning fires**
+```bash
+python -c "
+import db, sqlite3
+conn = sqlite3.connect('permit_miner.db')
+print(conn.execute('SELECT * FROM exclusion_rules').fetchall())
+"
+# Expected: address rule created; contractor count incremented if contractor present
+```
+
+**6. Dedup works — running Monday pull twice doesn't double-insert**
+```bash
+python -m pipeline.monday_pull   # run again
+python -c "
+import sqlite3
+conn = sqlite3.connect('permit_miner.db')
+print(conn.execute('SELECT COUNT(*) FROM permits WHERE status=\"Queued\"').fetchone())
+"
+# Expected: same count as after first run
+```
+
+---
+
+## Section 2 — Tuesday Morning (6 tests)
+
+**7. Tuesday send runs without errors**
+```bash
+python -m pipeline.tuesday_send
+# Expected: exits 0, Lob calls logged (or test-mode log in MODE=test)
+```
+
+**8. Permits status updated to Sent**
+```bash
+python -c "
+import sqlite3
+conn = sqlite3.connect('permit_miner.db')
+print(conn.execute('SELECT COUNT(*) FROM permits WHERE status=\"Sent\"').fetchone())
+"
+# Expected: count matches number of Queued records before send
+```
+
+**9. Sales digest email arrives**
+- Check: email received at `DIGEST_RECIPIENTS`
+- Check: sent permits listed with contact info (phone/email as clickable links)
+- Check: Exclude buttons present (for post-send exclusions)
+
+**10. Lob postcard appears in Lob dashboard**
+- Log in to lob.com → Postcards
+- Expected: new postcard(s) visible with correct recipient name and address
+- Expected: merge variables rendered (name, QR URL)
+
+**11. PURL scan endpoint works**
+```bash
+# Get a permit ID from the DB first
+pid=$(python -c "import sqlite3; conn=sqlite3.connect('permit_miner.db'); row=conn.execute('SELECT id FROM permits WHERE status=\"Sent\" LIMIT 1').fetchone(); print(row[0] if row else 'none')")
+curl "{BASE_URL}/scan?pid=$pid"
+# Expected: {"status":"ok","permit_type":"...","is_new_construction":false,"tags":"..."}
+```
+
+**12. Scan alert email fires and status updates**
+- After Step 11:
+- Check: scan alert email received at `ALERT_RECIPIENTS` with owner name + phone
+- Check: DB record status = `Engaged`, `qr_scanned=1`, `first_scan_date` set
+
+---
+
+## Section 3 — When Postcard Arrives (6 tests)
+
+**13. QR code scans correctly**
+- Scan QR code on physical postcard with phone
+- Expected: browser opens `getlivewire.com/welcome?pid={id}`
+
+**14. PURL landing page loads**
+- Expected: page loads, no JS errors in browser console
+- Expected: page content swaps to match permit type (pool/renovation/new construction/etc.)
+
+**15. Scan alert received on phone**
+- Expected: email alert arrives within 30 seconds of scanning
+- Expected: owner name prominent, phone number large and tappable
+
+**16. Scan recorded in DB**
+```bash
+python -c "
+import sqlite3
+conn = sqlite3.connect('permit_miner.db')
+rows = conn.execute('SELECT id, owner_name, status, qr_scanned, scan_count FROM permits WHERE qr_scanned=1').fetchall()
+for r in rows: print(dict(zip(['id','owner','status','scanned','count'], r)))
+"
+# Expected: record shows qr_scanned=1, scan_count>=1, status=Engaged
+```
+
+**17. Repeat scans increment count (no duplicate alerts)**
+- Scan QR code a second time
+- Expected: scan_count increments, but no second scan alert email
+- Expected: status stays `Engaged` (not reset)
+
+**18. Monthly report runs**
+```bash
+python -m pipeline.monthly_report
+# Expected: report email with funnel metrics, exclusion reasons, ZIP table
+# All zeros are acceptable on first run — confirms the query runs without error
+```
+
+---
+
+## Pass criteria
+
+All 18 checks green before flipping `MODE=live` and enabling production cron jobs.
