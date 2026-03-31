@@ -1,13 +1,16 @@
 """
-monday_pull.py — Permit Miner Monday 8AM pipeline.
+monday_pull.py — Permit Miner Monday 8AM pipeline (no-Shovels).
 
-Pulls permits from Shovels API for all configured ZIP codes,
-filters by value + owner type + tags + exclusion rules,
-enriches with contact data, stores as Queued in SQLite,
-then sends the Monday preview email to Henry with Exclude buttons.
+1. Read data/scans.json (written by WordPress) → mark permits Engaged
+2. Pull permits from county scrapers + Virginia state CSV
+3. Filter by owner type, value, permit type
+4. Enrich contacts via Apollo API
+5. Insert Queued records in SQLite
+6. Write data/permit_registry.json (for WordPress scan alerts)
+7. Send Monday preview email with one-click Exclude links
 
 Run:  python -m pipeline.monday_pull
-Cron: 0 8 * * 1  (Monday 8:00 AM ET — set TZ=America/New_York in cron env)
+Cron: 0 13 * * 1  (8AM ET = 13:00 UTC, Monday)
 """
 import json
 import logging
@@ -19,6 +22,8 @@ import httpx
 import config
 import db
 from pipeline.mailer import send_email
+from pipeline.scrapers import virginia_state, chesterfield, goochland, powhatan, hanover
+from pipeline.scrapers.assessor import get_assessed_value
 
 logging.basicConfig(
     level=logging.INFO,
@@ -29,149 +34,221 @@ log = logging.getLogger(__name__)
 CUSTOMER_ID = "livewire"
 
 
-# ── Shovels API helpers ────────────────────────────────────────────────────────
+# ── Owner type detection ───────────────────────────────────────────────────────
 
-def shovels_headers() -> dict:
-    return {"X-API-Key": config.SHOVELS_API_KEY, "Accept": "application/json"}
-
-
-def fetch_permits_for_zip(zip_code: str, since_date: str) -> list[dict]:
-    """
-    Cursor-paginate through /v2/permits/search for one ZIP.
-    Returns a flat list of raw permit dicts.
-    """
-    url = f"{config.SHOVELS_BASE_URL}/permits/search"
-    permits = []
-    cursor = None
-
-    while True:
-        params = {
-            "zip_code": zip_code,
-            "file_date_after": since_date,
-            "size": config.SHOVELS_PAGE_SIZE,
-        }
-        if cursor:
-            params["cursor"] = cursor
-
-        try:
-            r = httpx.get(url, headers=shovels_headers(), params=params, timeout=30)
-            r.raise_for_status()
-        except httpx.HTTPError as e:
-            log.error("Shovels API error for ZIP %s: %s", zip_code, e)
-            # Retry once
-            try:
-                r = httpx.get(url, headers=shovels_headers(), params=params, timeout=30)
-                r.raise_for_status()
-            except httpx.HTTPError as e2:
-                log.error("Shovels retry failed for ZIP %s: %s", zip_code, e2)
-                break
-
-        payload = r.json()
-        page_permits = payload.get("permits") or payload.get("results") or []
-        permits.extend(page_permits)
-        log.debug("ZIP %s — fetched %d permits (page total: %d)", zip_code, len(page_permits), len(permits))
-
-        cursor = payload.get("next_cursor") or payload.get("cursor")
-        if not cursor or not page_permits:
-            break
-
-    return permits
+def owner_is_individual(owner_name: str) -> bool:
+    """Returns True if owner_name does not match any company pattern."""
+    if not owner_name:
+        return False
+    name_upper = owner_name.upper()
+    for pattern in config.COMPANY_PATTERNS:
+        if pattern.upper() in name_upper:
+            return False
+    return True
 
 
-def fetch_residents(address_id: str) -> dict:
-    """Fetch contact enrichment from /addresses/{address_id}/residents."""
-    if not address_id:
-        return {}
-    url = f"{config.SHOVELS_BASE_URL}/addresses/{address_id}/residents"
-    try:
-        r = httpx.get(url, headers=shovels_headers(), timeout=20)
-        if r.status_code == 200:
-            data = r.json()
-            residents = data.get("residents") or []
-            if residents:
-                # Take the first individual resident
-                res = residents[0]
-                return {
-                    "owner_phone":        res.get("phone"),
-                    "owner_email":        res.get("email"),
-                    "owner_linkedin":     res.get("linkedin_url"),
-                    "owner_income_range": res.get("income_range"),
-                    "owner_net_worth":    res.get("net_worth"),
-                }
-    except Exception as e:
-        log.debug("Residents lookup failed for address %s: %s", address_id, e)
-    return {}
-
-
-def fetch_contractor_name(contractor_id: str) -> tuple[str, str, str]:
-    """Returns (name, phone, email) for a contractor ID."""
-    if not contractor_id:
-        return "", "", ""
-    url = f"{config.SHOVELS_BASE_URL}/contractors"
-    try:
-        r = httpx.get(url, headers=shovels_headers(), params={"id": contractor_id}, timeout=20)
-        if r.status_code == 200:
-            data = r.json()
-            contractors = data.get("contractors") or data.get("results") or []
-            if contractors:
-                c = contractors[0]
-                return (
-                    c.get("name") or c.get("company_name") or "",
-                    c.get("phone") or "",
-                    c.get("email") or "",
-                )
-    except Exception as e:
-        log.debug("Contractor lookup failed for %s: %s", contractor_id, e)
-    return "", "", ""
-
-
-# ── Filtering logic ────────────────────────────────────────────────────────────
+# ── Permit classification ──────────────────────────────────────────────────────
 
 def is_new_construction(permit: dict) -> bool:
-    tags = permit.get("tags") or []
-    if isinstance(tags, str):
-        tags = json.loads(tags)
-    tag_set = {t.lower() for t in tags}
-    if tag_set & config.NEW_CONSTRUCTION_TAGS:
-        return True
-    permit_type = (permit.get("type") or permit.get("permit_type") or "").lower()
-    return any(kw in permit_type for kw in config.NEW_CONSTRUCTION_TYPE_KEYWORDS)
+    """Returns True if permit type/description matches new construction keywords."""
+    text = (
+        (permit.get("permit_type") or "") + " " +
+        (permit.get("description") or "")
+    ).lower()
+    return any(kw in text for kw in config.NEW_CONSTRUCTION_KEYWORDS)
 
 
 def passes_tag_filter(permit: dict) -> bool:
-    tags = permit.get("tags") or []
-    if isinstance(tags, str):
-        try:
-            tags = json.loads(tags)
-        except Exception:
-            tags = []
-    tag_set = {t.lower() for t in tags}
-    qualifying = {t.lower() for t in config.QUALIFYING_TAGS}
-    return bool(tag_set & qualifying)
+    """Returns True if permit type/description contains at least one qualifying keyword."""
+    text = (
+        (permit.get("permit_type") or "") + " " +
+        (permit.get("description") or "")
+    ).lower()
+    return any(tag in text for tag in config.QUALIFYING_TAGS)
 
 
 def passes_value_filter(permit: dict, new_construction: bool) -> bool:
+    """
+    New construction always passes (vacant land has $0 assessed value).
+    Otherwise: assessed >= $500K OR job value >= $75K.
+    """
     if new_construction:
-        return True   # Always include — vacant land has $0 assessed value
-    assessed = permit.get("property_assess_market_value") or 0
-    return assessed >= config.MIN_ASSESSED_VALUE_CENTS
+        return True
+    assessed = permit.get("assessed_value_dollars") or 0
+    if assessed >= config.MIN_ASSESSED_VALUE_DOLLARS:
+        return True
+    job_val = permit.get("job_value_dollars") or 0
+    return job_val >= config.MIN_JOB_VALUE_DOLLARS
 
 
-def owner_is_individual(permit: dict) -> bool:
-    owner_type = (permit.get("property_owner_type") or "").lower()
-    return owner_type == "individual"
+# ── Apollo contact enrichment ──────────────────────────────────────────────────
+
+def enrich_via_apollo(owner_name: str, city: str = "Richmond", state: str = "VA") -> dict:
+    """
+    POST to Apollo /v1/people/match — returns phone, email, linkedin if found.
+    Returns empty dict on failure or missing key.
+    """
+    if not config.APOLLO_API_KEY:
+        return {}
+    if not owner_name or not owner_name.strip():
+        return {}
+
+    # Parse name into first/last
+    parts = owner_name.strip().split()
+    first = parts[0] if parts else ""
+    last = " ".join(parts[1:]) if len(parts) > 1 else ""
+    if not last:
+        return {}
+
+    try:
+        r = httpx.post(
+            "https://api.apollo.io/v1/people/match",
+            headers={
+                "Content-Type": "application/json",
+                "Cache-Control": "no-cache",
+            },
+            json={
+                "api_key": config.APOLLO_API_KEY,
+                "first_name": first,
+                "last_name": last,
+                "organization_name": None,
+                "domain": None,
+                "city": city,
+                "state": state,
+                "country": "US",
+                "reveal_personal_emails": True,
+                "reveal_phone_number": True,
+            },
+            timeout=20,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            person = data.get("person") or {}
+            if not person:
+                return {}
+
+            # Phone: prefer mobile, fall back to other numbers
+            phone = ""
+            for pn in person.get("phone_numbers") or []:
+                if pn.get("type") in ("mobile", "direct"):
+                    phone = pn.get("raw_number") or pn.get("sanitized_number") or ""
+                    break
+            if not phone:
+                numbers = person.get("phone_numbers") or []
+                if numbers:
+                    phone = numbers[0].get("raw_number") or numbers[0].get("sanitized_number") or ""
+
+            email = person.get("email") or ""
+            # Avoid guessed/work emails — prefer personal if available
+            if person.get("personal_emails"):
+                email = person["personal_emails"][0]
+
+            return {
+                "owner_phone":    phone,
+                "owner_email":    email,
+                "owner_linkedin": person.get("linkedin_url") or "",
+            }
+        elif r.status_code == 422:
+            # Unprocessable — bad name match, not an error
+            return {}
+        else:
+            log.debug("Apollo match returned %d for %s", r.status_code, owner_name)
+            return {}
+    except Exception as e:
+        log.debug("Apollo enrichment failed for %s: %s", owner_name, e)
+        return {}
 
 
-# ── Address string normalization ───────────────────────────────────────────────
+# ── Scan processing (from WordPress scans.json) ────────────────────────────────
 
-def build_address_string(permit: dict) -> str:
-    parts = [
-        permit.get("property_address") or permit.get("address") or "",
-        permit.get("property_city") or permit.get("city") or "",
-        permit.get("property_state") or permit.get("state") or "",
-        permit.get("property_zip") or permit.get("zip_code") or "",
-    ]
-    return ", ".join(p for p in parts if p).strip()
+def process_scans():
+    """Read scans.json written by WordPress and mark permits as Engaged in DB."""
+    scans = db.read_scans()
+    if not scans:
+        log.info("No new scans to process.")
+        return
+
+    engaged = 0
+    for scan in scans:
+        pid = scan.get("pid")
+        if not pid:
+            continue
+        permit = db.get_permit(pid)
+        if not permit:
+            continue
+        if permit["status"] not in ("Sent", "Drip Sent", "Engaged"):
+            continue
+
+        scan_count = (permit["scan_count"] or 0) + 1
+        extra = {
+            "qr_scanned":    1,
+            "scan_count":    scan_count,
+        }
+        if not permit["first_scan_date"]:
+            extra["first_scan_date"] = scan.get("timestamp", db.now_iso())
+        db.set_permit_status(pid, "Engaged", extra)
+        engaged += 1
+        log.info("Marked permit %s as Engaged (scan #%d)", pid, scan_count)
+
+    log.info("Processed %d scan events → %d permits marked Engaged", len(scans), engaged)
+
+
+# ── Exclusion processing (from WordPress exclusions.json) ─────────────────────
+
+def process_exclusions():
+    """Read exclusions.json and mark those permits as Excluded in DB."""
+    exclusions = db.read_exclusions()
+    if not exclusions:
+        return
+
+    for excl in exclusions:
+        pid = excl.get("pid")
+        reason = excl.get("reason", "")
+        if not pid:
+            continue
+        permit = db.get_permit(pid)
+        if not permit:
+            continue
+        if permit["status"] == "Excluded":
+            continue
+        db.set_permit_status(pid, "Excluded", {
+            "exclude_reason": reason,
+            "excluded_by":    "email_link",
+            "excluded_at":    excl.get("timestamp", db.now_iso()),
+        })
+        # Learn: create address exclusion rule
+        db.upsert_exclusion_rule(CUSTOMER_ID, "Address", permit["property_address"], "Contains")
+        log.info("Excluded permit %s (reason: %s)", pid, reason)
+
+
+# ── Registry builder ───────────────────────────────────────────────────────────
+
+def build_and_write_registry():
+    """
+    Write permit_registry.json: {pid: {owner_name, phone, address, permit_type}}
+    Includes all Sent + Engaged permits. WordPress reads this for scan alerts.
+    """
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, owner_name, owner_phone, property_address, "
+            "       property_city, property_zip, permit_type, is_new_construction "
+            "FROM permits WHERE customer_id=? AND status IN ('Sent','Drip Sent','Engaged')",
+            (CUSTOMER_ID,),
+        ).fetchall()
+
+    registry = {}
+    for r in rows:
+        registry[r["id"]] = {
+            "owner_name":        r["owner_name"] or "",
+            "phone":             r["owner_phone"] or "",
+            "address":           f"{r['property_address'] or ''}, {r['property_city'] or ''} {r['property_zip'] or ''}".strip(", "),
+            "permit_type":       r["permit_type"] or "",
+            "is_new_construction": bool(r["is_new_construction"]),
+        }
+
+    db.write_registry(registry)
+    log.info("Registry written with %d permits.", len(registry))
+    return registry
 
 
 # ── PURL URL builder ───────────────────────────────────────────────────────────
@@ -191,97 +268,87 @@ def build_purl_url(permit_id: str, is_drip: bool = False) -> str:
 # ── Drip check ────────────────────────────────────────────────────────────────
 
 def run_drip_check():
-    """
-    Find Sent records older than DRIP_DELAY_DAYS with no scan (touch_number=1)
-    and create Drip Queued records for second-touch send on Tuesday.
-    """
-    if not True:  # Drip disabled by default — guard with config flag if desired
-        return
+    """Queue second-touch drip records for permits sent >21 days ago with no scan."""
     cutoff = (date.today() - timedelta(days=config.DRIP_DELAY_DAYS)).isoformat()
     with db.get_conn() as conn:
         candidates = conn.execute(
-            """SELECT * FROM permits
-               WHERE customer_id=? AND status='Sent'
-               AND touch_number=1 AND qr_scanned=0
-               AND postcard_sent_date <= ?""",
+            "SELECT * FROM permits WHERE customer_id=? AND status='Sent' "
+            "AND touch_number=1 AND qr_scanned=0 AND postcard_sent_date <= ?",
             (CUSTOMER_ID, cutoff),
         ).fetchall()
 
     drip_count = 0
     for p in candidates:
-        # Check max touches not exceeded
         with db.get_conn() as conn:
-            existing_drip = conn.execute(
+            existing = conn.execute(
                 "SELECT id FROM permits WHERE parent_permit_id=? AND touch_number=2",
                 (p["id"],),
             ).fetchone()
-        if existing_drip:
+        if existing:
             continue
 
         drip_id = db.new_id()
         purl_url = build_purl_url(drip_id, is_drip=True)
-        drip_data = {
-            "id": drip_id,
-            "customer_id": CUSTOMER_ID,
-            "shovels_permit_id": p["shovels_permit_id"],
-            "source": p["source"],
-            "property_address": p["property_address"] + "__drip2",  # avoid UNIQUE collision
-            "property_city": p["property_city"],
-            "property_state": p["property_state"],
-            "property_zip": p["property_zip"],
-            "assessed_value_cents": p["assessed_value_cents"],
-            "permit_type": p["permit_type"],
-            "permit_tags": p["permit_tags"],
-            "is_new_construction": p["is_new_construction"],
-            "owner_name": p["owner_name"],
-            "owner_type": p["owner_type"],
-            "contractor_name": p["contractor_name"],
-            "owner_phone": p["owner_phone"],
-            "owner_email": p["owner_email"],
-            "status": "Drip Queued",
-            "purl_url": purl_url,
-            "touch_number": 2,
-            "parent_permit_id": p["id"],
-        }
         ts = db.now_iso()
         with db.get_conn() as conn:
             conn.execute(
                 """INSERT OR IGNORE INTO permits
-                   (id, customer_id, shovels_permit_id, source,
-                    property_address, property_city, property_state, property_zip,
-                    assessed_value_cents, permit_type, permit_tags, is_new_construction,
+                   (id, customer_id, source, property_address, property_city,
+                    property_state, property_zip, assessed_value_cents,
+                    permit_type, permit_tags, is_new_construction,
                     owner_name, owner_type, contractor_name,
                     owner_phone, owner_email,
                     status, purl_url, touch_number, parent_permit_id,
                     created_at, updated_at)
-                   VALUES
-                   (:id, :customer_id, :shovels_permit_id, :source,
-                    :property_address, :property_city, :property_state, :property_zip,
-                    :assessed_value_cents, :permit_type, :permit_tags, :is_new_construction,
-                    :owner_name, :owner_type, :contractor_name,
-                    :owner_phone, :owner_email,
-                    :status, :purl_url, :touch_number, :parent_permit_id,
-                    :created_at, :updated_at)""",
-                {**drip_data, "created_at": ts, "updated_at": ts},
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (drip_id, CUSTOMER_ID, p["source"],
+                 p["property_address"] + "__drip2",
+                 p["property_city"], p["property_state"], p["property_zip"],
+                 p["assessed_value_cents"],
+                 p["permit_type"], p["permit_tags"], p["is_new_construction"],
+                 p["owner_name"], p["owner_type"], p["contractor_name"],
+                 p["owner_phone"], p["owner_email"],
+                 "Drip Queued", purl_url, 2, p["id"], ts, ts),
             )
         drip_count += 1
+
     if drip_count:
         log.info("Drip check: queued %d second-touch records.", drip_count)
 
 
 # ── Preview email ──────────────────────────────────────────────────────────────
 
-def dollars(cents: int) -> str:
-    if not cents:
+def dollars(val: int) -> str:
+    if not val:
         return "N/A"
-    return f"${cents / 100:,.0f}"
+    return f"${int(val):,.0f}"
 
 
 def build_preview_email(new_permits: list[dict]) -> str:
     rows = ""
     for p in new_permits:
-        exclude_url = f"{config.BASE_URL}/exclude?pid={p['id']}"
-        nc_badge = " <span style='background:#e8943a;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:bold;'>NEW BUILD</span>" if p.get("is_new_construction") else ""
+        pid = p["id"]
+        # One-click exclude links — reason in the URL, no form needed
+        ex_base = f"https://getlivewire.com/permit-exclude?pid={pid}"
+        exclude_links = (
+            f'<a href="{ex_base}&reason=existing_customer" '
+            f'style="background:#c0392b;color:#fff;padding:4px 9px;border-radius:3px;'
+            f'text-decoration:none;font-size:10px;margin:1px;display:inline-block;">Existing customer</a>'
+            f'<a href="{ex_base}&reason=not_homeowner" '
+            f'style="background:#555;color:#fff;padding:4px 9px;border-radius:3px;'
+            f'text-decoration:none;font-size:10px;margin:1px;display:inline-block;">Not homeowner</a>'
+            f'<a href="{ex_base}&reason=wrong_project" '
+            f'style="background:#555;color:#fff;padding:4px 9px;border-radius:3px;'
+            f'text-decoration:none;font-size:10px;margin:1px;display:inline-block;">Wrong project</a>'
+            f'<a href="{ex_base}&reason=already_contacted" '
+            f'style="background:#555;color:#fff;padding:4px 9px;border-radius:3px;'
+            f'text-decoration:none;font-size:10px;margin:1px;display:inline-block;">Already contacted</a>'
+        )
+        nc_badge = (
+            " <span style='background:#e8943a;color:#fff;padding:2px 6px;"
+            "border-radius:3px;font-size:10px;font-weight:bold;'>NEW BUILD</span>"
+        ) if p.get("is_new_construction") else ""
+        assessed_str = dollars(p.get("assessed_value_dollars") or (p.get("assessed_value_cents") or 0) // 100)
         rows += f"""
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:10px 8px;">
@@ -292,13 +359,13 @@ def build_preview_email(new_permits: list[dict]) -> str:
             {p.get('permit_type') or 'N/A'}
           </td>
           <td style="padding:10px 8px;font-size:12px;color:#555;white-space:nowrap;">
-            {dollars(p.get('assessed_value_cents'))}
+            {assessed_str}
           </td>
           <td style="padding:10px 8px;font-size:12px;color:#555;">
             {p.get('contractor_name') or 'N/A'}
           </td>
-          <td style="padding:10px 8px;">
-            <a href="{exclude_url}" style="background:#c0392b;color:#fff;padding:5px 12px;border-radius:4px;text-decoration:none;font-size:11px;font-weight:bold;">Exclude</a>
+          <td style="padding:10px 8px;font-size:11px;">
+            {exclude_links}
           </td>
         </tr>"""
 
@@ -306,7 +373,7 @@ def build_preview_email(new_permits: list[dict]) -> str:
     today = str(date.today())
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"></head>
-<body style="font-family:Arial,sans-serif;color:#333;max-width:700px;margin:0 auto;">
+<body style="font-family:Arial,sans-serif;color:#333;max-width:800px;margin:0 auto;">
 
 <div style="background:#1a2744;padding:24px;color:#fff;">
   <span style="color:#e8943a;font-size:20px;font-weight:bold;">PERMIT MINER</span>
@@ -314,9 +381,9 @@ def build_preview_email(new_permits: list[dict]) -> str:
   <span style="font-size:15px;">Monday Preview — {count} permit{'s' if count != 1 else ''} queued for Tuesday send</span>
 </div>
 
-<div style="padding:16px 0;font-size:13px;color:#666;background:#f9f9f9;padding:12px 24px;border-bottom:1px solid #ddd;">
+<div style="padding:12px 24px;font-size:13px;color:#666;background:#f9f9f9;border-bottom:1px solid #ddd;">
   Postcards send <strong>tomorrow (Tuesday) at 8AM</strong> unless excluded.
-  Tap <strong>Exclude</strong> to block a record before it mails.
+  Click a button to block a record before it mails — one click, no form.
 </div>
 
 <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">
@@ -326,7 +393,7 @@ def build_preview_email(new_permits: list[dict]) -> str:
       <th style="padding:8px;text-align:left;">Permit Type</th>
       <th style="padding:8px;text-align:left;">Assessed Value</th>
       <th style="padding:8px;text-align:left;">Contractor</th>
-      <th style="padding:8px;"></th>
+      <th style="padding:8px;text-align:left;">Exclude</th>
     </tr>
   </thead>
   <tbody>{rows}</tbody>
@@ -335,7 +402,8 @@ def build_preview_email(new_permits: list[dict]) -> str:
 {'<p style="padding:24px;color:#999;font-size:13px;text-align:center;">No new permits found this week.</p>' if count == 0 else ''}
 
 <div style="padding:16px 24px;font-size:11px;color:#999;border-top:1px solid #eee;margin-top:24px;">
-  Permit Miner | Livewire &nbsp;·&nbsp; {count} permit{'s' if count != 1 else ''} queued
+  Permit Miner | Livewire &nbsp;·&nbsp; {count} permit{'s' if count != 1 else ''} queued &nbsp;·&nbsp;
+  Source: County permit portals + Virginia statewide data
 </div>
 </body></html>"""
 
@@ -346,126 +414,174 @@ def run():
     log.info("=== Monday Pull started ===")
     db.init_db()
 
-    # Determine since_date: last Monday run or 7 days ago
+    # ── Step 1: Process scans from WordPress ──────────────────────────────────
+    log.info("Step 1: Processing scans from WordPress...")
+    process_scans()
+
+    # ── Step 2: Process exclusions from WordPress ─────────────────────────────
+    log.info("Step 2: Processing exclusions from WordPress...")
+    process_exclusions()
+
+    # ── Step 3: Determine lookback window ─────────────────────────────────────
     app_cfg = db.get_app_config(CUSTOMER_ID)
     if app_cfg and app_cfg["last_monday_run"]:
-        since_date = app_cfg["last_monday_run"]
+        since_days = (date.today() - date.fromisoformat(app_cfg["last_monday_run"])).days + 1
     else:
-        since_date = (date.today() - timedelta(days=7)).isoformat()
-    log.info("Pulling permits filed since %s", since_date)
+        since_days = 14  # First run: pull 2 weeks back
+    log.info("Step 3: Pulling permits from last %d days", since_days)
 
-    total_found = total_inserted = total_filtered = 0
-    new_permits = []
+    # ── Step 4: Collect permits from all sources ──────────────────────────────
+    log.info("Step 4: Fetching from all scrapers...")
+    all_raw: list[dict] = []
 
-    for zip_code in config.ZIP_CODES:
-        if zip_code in config.HENRICO_ZIPS:
-            log.info("ZIP %s — skipping (Henrico Direct, handled by henrico_import)", zip_code)
+    # Virginia statewide CSV — primary source for most ZIPs
+    try:
+        va_permits = virginia_state.fetch_permits(since_days=since_days)
+        all_raw.extend(va_permits)
+        log.info("Virginia state CSV: %d permits", len(va_permits))
+    except Exception as e:
+        log.error("Virginia state CSV failed: %s", e)
+
+    # Chesterfield — Accela portal (may have better data than state CSV)
+    try:
+        cf_permits = chesterfield.fetch_permits(since_days=since_days)
+        all_raw.extend(cf_permits)
+        log.info("Chesterfield: %d permits", len(cf_permits))
+    except Exception as e:
+        log.error("Chesterfield scraper failed: %s", e)
+
+    # Goochland — EnerGov portal
+    try:
+        gl_permits = goochland.fetch_permits(since_days=since_days)
+        all_raw.extend(gl_permits)
+        log.info("Goochland: %d permits", len(gl_permits))
+    except Exception as e:
+        log.error("Goochland scraper failed: %s", e)
+
+    # Powhatan / Hanover stubs (return [] until portals are identified)
+    powhatan.fetch_permits(since_days=since_days)
+    hanover.fetch_permits(since_days=since_days)
+
+    log.info("Total raw permits collected: %d", len(all_raw))
+
+    # ── Step 5: Filter + enrich + insert ──────────────────────────────────────
+    log.info("Step 5: Filtering and inserting...")
+    total_filtered = total_inserted = 0
+    new_permits: list[dict] = []
+
+    # Track addresses seen this run to dedup across scrapers
+    seen_addresses: set[str] = set()
+
+    for p in all_raw:
+        owner = (p.get("owner_name") or "").strip()
+        address = (p.get("property_address") or "").strip()
+        zip_code = (p.get("property_zip") or "")[:5]
+
+        if not address or not zip_code:
+            total_filtered += 1
             continue
 
-        log.info("ZIP %s — fetching...", zip_code)
-        raw_permits = fetch_permits_for_zip(zip_code, since_date)
-        log.info("ZIP %s — %d raw permits returned", zip_code, len(raw_permits))
-        total_found += len(raw_permits)
+        # Dedup across scrapers (same address from VA CSV + county portal)
+        addr_key = address.lower().strip()
+        if addr_key in seen_addresses:
+            total_filtered += 1
+            continue
+        seen_addresses.add(addr_key)
 
-        for p in raw_permits:
-            # ── Filters ──────────────────────────────────────────────────────
-            if not owner_is_individual(p):
-                total_filtered += 1
-                continue
+        # Skip companies / LLCs
+        if not owner_is_individual(owner):
+            total_filtered += 1
+            continue
 
-            new_const = is_new_construction(p)
+        new_const = is_new_construction(p)
 
-            if not passes_value_filter(p, new_const):
-                total_filtered += 1
-                continue
+        # Tag / permit type filter
+        if not new_const and not passes_tag_filter(p):
+            total_filtered += 1
+            continue
 
-            if not passes_tag_filter(p):
-                total_filtered += 1
-                continue
+        # Value filter — try ArcGIS lookup if job_value is missing
+        assessed = p.get("assessed_value_dollars") or 0
+        if assessed == 0 and not new_const:
+            assessed = get_assessed_value(address, zip_code)
+            p["assessed_value_dollars"] = assessed
 
-            # ── Build record dict ─────────────────────────────────────────
-            address = build_address_string(p)
-            if not address:
-                total_filtered += 1
-                continue
+        if not passes_value_filter(p, new_const):
+            total_filtered += 1
+            continue
 
-            tags = p.get("tags") or []
-            if isinstance(tags, list):
-                tags_str = json.dumps(tags)
-            else:
-                tags_str = str(tags)
+        # Exclusion rule check
+        if db.is_excluded_by_rules({
+            "contractor_name": p.get("contractor_name"),
+            "permit_type": p.get("permit_type"),
+            "permit_tags": p.get("description"),
+            "property_address": address,
+            "owner_name": owner,
+        }, CUSTOMER_ID):
+            total_filtered += 1
+            continue
 
-            permit_data = {
-                "customer_id":           CUSTOMER_ID,
-                "shovels_permit_id":     p.get("id") or p.get("permit_id"),
-                "source":                "Shovels",
-                "property_address":      address,
-                "property_city":         p.get("property_city") or p.get("city"),
-                "property_state":        p.get("property_state") or p.get("state"),
-                "property_zip":          p.get("property_zip") or p.get("zip_code") or zip_code,
-                "assessed_value_cents":  p.get("property_assess_market_value") or 0,
-                "shovels_address_id":    (p.get("geo_ids") or {}).get("address_id") or p.get("address_id"),
-                "permit_type":           p.get("type") or p.get("permit_type"),
-                "permit_tags":           tags_str,
-                "is_new_construction":   new_const,
-                "file_date":             p.get("file_date"),
-                "job_value_cents":       p.get("job_value") or 0,
-                "owner_name":            p.get("property_legal_owner") or p.get("owner_name"),
-                "owner_type":            p.get("property_owner_type"),
-                "contractor_id":         p.get("contractor_id"),
-                "status":                "Queued",
-            }
+        # Apollo enrichment
+        contact = enrich_via_apollo(owner, p.get("property_city", "Richmond"), "VA")
 
-            # ── Exclusion rule check ──────────────────────────────────────
-            if db.is_excluded_by_rules(permit_data, CUSTOMER_ID):
-                log.debug("Permit at %s matched exclusion rule — skipping.", address)
-                total_filtered += 1
-                continue
+        permit_data = {
+            "customer_id":           CUSTOMER_ID,
+            "source":                p.get("source", "County Portal"),
+            "property_address":      address,
+            "property_city":         p.get("property_city", ""),
+            "property_state":        p.get("property_state", "VA"),
+            "property_zip":          zip_code,
+            "assessed_value_cents":  int(assessed) * 100,
+            "permit_type":           p.get("permit_type", ""),
+            "permit_tags":           p.get("description", ""),
+            "is_new_construction":   new_const,
+            "file_date":             p.get("file_date", ""),
+            "job_value_cents":       int(p.get("job_value_dollars") or 0) * 100,
+            "owner_name":            owner,
+            "owner_type":            "individual",
+            "contractor_name":       p.get("contractor_name", ""),
+            "owner_phone":           contact.get("owner_phone", ""),
+            "owner_email":           contact.get("owner_email", ""),
+            "owner_linkedin":        contact.get("owner_linkedin", ""),
+            "status":                "Queued",
+        }
 
-            # ── Contact enrichment ────────────────────────────────────────
-            address_id = permit_data.get("shovels_address_id")
-            if address_id:
-                contact = fetch_residents(address_id)
-                permit_data.update(contact)
+        inserted, permit_id = db.upsert_permit(permit_data)
+        if inserted:
+            purl = build_purl_url(permit_id)
+            db.set_permit_status(permit_id, "Queued", {"purl_url": purl})
+            permit_data["id"] = permit_id
+            permit_data["purl_url"] = purl
+            permit_data["assessed_value_dollars"] = assessed
+            new_permits.append(permit_data)
+            total_inserted += 1
+        else:
+            log.debug("Dedup skip: %s", address)
 
-            # ── Contractor lookup ─────────────────────────────────────────
-            if permit_data.get("contractor_id"):
-                c_name, c_phone, c_email = fetch_contractor_name(permit_data["contractor_id"])
-                permit_data["contractor_name"]  = c_name
-                permit_data["contractor_phone"] = c_phone
-                permit_data["contractor_email"] = c_email
+    log.info(
+        "Step 5 complete — raw: %d, filtered: %d, inserted: %d",
+        len(all_raw), total_filtered, total_inserted,
+    )
 
-            # ── Insert (dedup by property_address) ────────────────────────
-            inserted, permit_id = db.upsert_permit(permit_data)
-            if inserted:
-                permit_data["id"] = permit_id
-                purl = build_purl_url(permit_id)
-                db.set_permit_status(permit_id, "Queued", {"purl_url": purl})
-                permit_data["purl_url"] = purl
-                new_permits.append(permit_data)
-                total_inserted += 1
-            else:
-                log.debug("Dedup skip: %s", address)
-
-    log.info("Pull complete — found: %d, filtered: %d, inserted: %d",
-             total_found, total_filtered, total_inserted)
-
-    # ── Drip check ─────────────────────────────────────────────────────────────
+    # ── Step 6: Drip check ────────────────────────────────────────────────────
+    log.info("Step 6: Running drip check...")
     run_drip_check()
 
-    # ── Update last_monday_run ─────────────────────────────────────────────────
+    # ── Step 7: Write permit registry ─────────────────────────────────────────
+    log.info("Step 7: Writing permit registry...")
+    build_and_write_registry()
+
+    # ── Step 8: Update last_monday_run ────────────────────────────────────────
     db.set_app_config_field("last_monday_run", str(date.today()))
 
-    # ── Send preview email ─────────────────────────────────────────────────────
-    if new_permits or True:  # always send so Henry knows the job ran
-        subject = f"Permit Miner Preview — {len(new_permits)} permit{'s' if len(new_permits) != 1 else ''} queued"
-        html = build_preview_email(new_permits)
-        send_email(config.PREVIEW_RECIPIENTS, subject, html)
-        log.info("Preview email sent to %s", config.PREVIEW_RECIPIENTS)
-    else:
-        log.info("No new permits — preview email suppressed.")
+    # ── Step 9: Send preview email ────────────────────────────────────────────
+    log.info("Step 9: Sending preview email...")
+    subject = f"Permit Miner Preview — {len(new_permits)} permit{'s' if len(new_permits) != 1 else ''} queued"
+    html = build_preview_email(new_permits)
+    send_email(config.PREVIEW_RECIPIENTS, subject, html)
+    log.info("Preview email sent to %s", config.PREVIEW_RECIPIENTS)
 
-    log.info("=== Monday Pull complete ===")
+    log.info("=== Monday Pull complete. %d new permits queued. ===", len(new_permits))
 
 
 if __name__ == "__main__":

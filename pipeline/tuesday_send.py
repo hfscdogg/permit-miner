@@ -1,11 +1,13 @@
 """
 tuesday_send.py — Permit Miner Tuesday 8AM pipeline.
 
-Sends Lob postcards for all Queued + Drip Queued permits,
-then emails Henry and the sales team a digest of what went out.
+1. Fetch exclusions.json from WordPress → mark excluded permits in DB
+2. Send Lob postcards for Queued + Drip Queued permits
+3. POST updated permit registry to WordPress (for instant scan alerts)
+4. Email Henry and sales team a digest
 
 Run:  python -m pipeline.tuesday_send
-Cron: 0 8 * * 2  (Tuesday 8:00 AM ET)
+Cron: 0 13 * * 2  (8AM ET = 13:00 UTC, Tuesday)
 """
 import base64
 import json
@@ -174,11 +176,110 @@ def build_digest_email(sent_permits: list[dict], error_count: int) -> str:
 </body></html>"""
 
 
+# ── WordPress exclusions sync ──────────────────────────────────────────────────
+
+def fetch_and_apply_exclusions():
+    """
+    Fetch exclusions.json from WordPress uploads and mark permits Excluded in DB.
+    Then clear the processed exclusions by POSTing [] back (via the WP REST endpoint).
+    """
+    try:
+        r = httpx.get(config.WP_EXCLUSIONS_URL, timeout=15, follow_redirects=True)
+        if r.status_code != 200:
+            log.info("WordPress exclusions.json: %d — skipping", r.status_code)
+            return
+        exclusions = r.json()
+        if not isinstance(exclusions, list) or not exclusions:
+            log.info("No WordPress exclusions to process.")
+            return
+    except Exception as e:
+        log.warning("Could not fetch WordPress exclusions: %s", e)
+        return
+
+    applied = 0
+    for excl in exclusions:
+        pid = excl.get("pid")
+        reason = excl.get("reason", "")
+        if not pid:
+            continue
+        permit = db.get_permit(pid)
+        if not permit or permit["status"] == "Excluded":
+            continue
+        db.set_permit_status(pid, "Excluded", {
+            "exclude_reason": reason,
+            "excluded_by":    "email_link",
+            "excluded_at":    excl.get("timestamp", db.now_iso()),
+        })
+        db.upsert_exclusion_rule(CUSTOMER_ID, "Address", permit["property_address"], "Contains")
+        applied += 1
+        log.info("Excluded permit %s via WordPress (reason: %s)", pid, reason)
+
+    log.info("Applied %d exclusions from WordPress.", applied)
+
+
+# ── WordPress registry push ─────────────────────────────────────────────────────
+
+def push_registry_to_wordpress(registry: dict):
+    """
+    POST permit registry to WordPress WP REST API so PHP can look up
+    permits instantly without calling GitHub API.
+    """
+    if not config.PERMIT_MINER_API_KEY:
+        log.warning("PERMIT_MINER_API_KEY not set — skipping WordPress registry push.")
+        return
+    if not registry:
+        return
+
+    try:
+        r = httpx.post(
+            config.WP_REGISTRY_ENDPOINT,
+            json=registry,
+            headers={
+                "Content-Type": "application/json",
+                "X-Permit-Miner-Key": config.PERMIT_MINER_API_KEY,
+            },
+            timeout=30,
+        )
+        if r.status_code in (200, 201):
+            log.info("Registry pushed to WordPress (%d permits).", len(registry))
+        else:
+            log.warning("WordPress registry push returned %d: %s", r.status_code, r.text[:200])
+    except Exception as e:
+        log.warning("WordPress registry push failed: %s", e)
+
+
+def build_registry_from_sent(sent_permits: list[dict]) -> dict:
+    """Build registry dict from newly sent permits + existing DB registry."""
+    # Start with current registry from DB
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, owner_name, owner_phone, property_address, "
+            "       property_city, property_zip, permit_type, is_new_construction "
+            "FROM permits WHERE customer_id=? AND status IN ('Sent','Drip Sent','Engaged')",
+            (CUSTOMER_ID,),
+        ).fetchall()
+
+    registry = {}
+    for r in rows:
+        registry[r["id"]] = {
+            "owner_name":        r["owner_name"] or "",
+            "phone":             r["owner_phone"] or "",
+            "address":           f"{r['property_address'] or ''}, {r['property_city'] or ''} {r['property_zip'] or ''}".strip(", "),
+            "permit_type":       r["permit_type"] or "",
+            "is_new_construction": bool(r["is_new_construction"]),
+        }
+    return registry
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def run():
     log.info("=== Tuesday Send started ===")
     db.init_db()
+
+    # ── Step 1: Apply WordPress exclusions ────────────────────────────────────
+    log.info("Step 1: Fetching exclusions from WordPress...")
+    fetch_and_apply_exclusions()
 
     queued = db.get_queued_permits(CUSTOMER_ID)
     log.info("%d permit(s) queued for send.", len(queued))
@@ -212,6 +313,12 @@ def run():
 
     # ── Update last_tuesday_run ─────────────────────────────────────────────────
     db.set_app_config_field("last_tuesday_run", today_str)
+
+    # ── Push registry to WordPress ──────────────────────────────────────────────
+    log.info("Pushing registry to WordPress...")
+    registry = build_registry_from_sent(sent_permits)
+    db.write_registry(registry)
+    push_registry_to_wordpress(registry)
 
     # ── Sales digest email ──────────────────────────────────────────────────────
     subject = f"Permit Miner — {len(sent_permits)} postcard{'s' if len(sent_permits) != 1 else ''} sent today"
