@@ -103,15 +103,15 @@ HENRICO_KEYWORDS = [
 # data.virginia.gov building permit dataset (may cover all counties)
 VA_STATE_CSV_URL = "https://data.virginia.gov/api/views/5y87-nuwi/rows.csv?accessType=DOWNLOAD"
 
-# ── WordPress endpoints ────────────────────────────────────────────────────────
-WP_BASE_URL = "https://getlivewire.com"
-WP_REGISTRY_ENDPOINT = f"{WP_BASE_URL}/wp-json/permit-miner/v1/registry"
-WP_EXCLUSIONS_URL = f"{WP_BASE_URL}/wp-content/uploads/permit-miner/exclusions.json"
-WP_SCANS_URL = f"{WP_BASE_URL}/wp-content/uploads/permit-miner/scans.json"
+# ── WordPress / Zoho endpoints ────────────────────────────────────────────────
+WP_BASE_URL             = os.getenv("WP_BASE_URL", "https://getlivewire.com")
+ZOHO_WEBHOOK_URL        = os.getenv("ZOHO_WEBHOOK_URL", "")      # Zoho Creator webhook for scan/exclude events
+ZOHO_LOOKUP_URL         = os.getenv("ZOHO_LOOKUP_URL", "")       # Zoho Creator API for permit lookups
+ZOHO_API_TOKEN          = os.getenv("ZOHO_API_TOKEN", "")        # Zoho OAuth token
 
 # ── Secrets (from .env) ───────────────────────────────────────────────────────
 APOLLO_API_KEY          = os.getenv("APOLLO_API_KEY", "")
-PERMIT_MINER_API_KEY    = os.getenv("PERMIT_MINER_API_KEY", "")  # shared secret for WP REST endpoint
+PERMIT_MINER_HMAC_SECRET = os.getenv("PERMIT_MINER_HMAC_SECRET", "")  # HMAC secret for signing PURL/exclude URLs
 
 LOB_LIVE_KEY            = os.getenv("LOB_LIVE_KEY", "")
 LOB_TEST_KEY            = os.getenv("LOB_TEST_KEY", "")

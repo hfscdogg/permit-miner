@@ -1,13 +1,13 @@
 """
 monday_pull.py — Permit Miner Monday 8AM pipeline (no-Shovels).
 
-1. Read data/scans.json (written by WordPress) → mark permits Engaged
+1. Read scan events (from Zoho) → mark permits Engaged
 2. Pull permits from county scrapers + Virginia state CSV
 3. Filter by owner type, value, permit type
 4. Enrich contacts via Apollo API
 5. Insert Queued records in SQLite
-6. Write data/permit_registry.json (for WordPress scan alerts)
-7. Send Monday preview email with one-click Exclude links
+6. Write data/permit_registry.json (for Zoho scan lookups)
+7. Send Monday preview email with signed one-click Exclude links
 
 Run:  python -m pipeline.monday_pull
 Cron: 0 13 * * 1  (8AM ET = 13:00 UTC, Monday)
@@ -159,10 +159,10 @@ def enrich_via_apollo(owner_name: str, city: str = "Richmond", state: str = "VA"
         return {}
 
 
-# ── Scan processing (from WordPress scans.json) ────────────────────────────────
+# ── Scan processing (from Zoho) ───────────────────────────────────────────────
 
 def process_scans():
-    """Read scans.json written by WordPress and mark permits as Engaged in DB."""
+    """Fetch scan events from Zoho and mark permits as Engaged in DB."""
     scans = db.read_scans()
     if not scans:
         log.info("No new scans to process.")
@@ -193,10 +193,10 @@ def process_scans():
     log.info("Processed %d scan events → %d permits marked Engaged", len(scans), engaged)
 
 
-# ── Exclusion processing (from WordPress exclusions.json) ─────────────────────
+# ── Exclusion processing (from Zoho) ──────────────────────────────────────────
 
 def process_exclusions():
-    """Read exclusions.json and mark those permits as Excluded in DB."""
+    """Fetch exclusions from Zoho and mark those permits as Excluded in DB."""
     exclusions = db.read_exclusions()
     if not exclusions:
         return
@@ -226,7 +226,7 @@ def process_exclusions():
 def build_and_write_registry():
     """
     Write permit_registry.json: {pid: {owner_name, phone, address, permit_type}}
-    Includes all Sent + Engaged permits. WordPress reads this for scan alerts.
+    Includes all Sent + Engaged permits. Zoho reads this for scan lookups.
     """
     with db.get_conn() as conn:
         rows = conn.execute(
@@ -253,11 +253,23 @@ def build_and_write_registry():
 
 # ── PURL URL builder ───────────────────────────────────────────────────────────
 
+def _sign_pid(permit_id: str) -> str:
+    """Generate HMAC-SHA256 signature for a permit ID."""
+    import hmac, hashlib
+    return hmac.new(
+        config.PERMIT_MINER_HMAC_SECRET.encode(),
+        permit_id.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def build_purl_url(permit_id: str, is_drip: bool = False) -> str:
     campaign = "luxury_permits_drip" if is_drip else "luxury_permits"
+    sig = _sign_pid(permit_id)
     return (
         f"{config.PURL_BASE_URL}"
         f"?pid={permit_id}"
+        f"&sig={sig}"
         f"&utm_source=permit_miner"
         f"&utm_medium=direct_mail"
         f"&utm_campaign={campaign}"
@@ -328,8 +340,9 @@ def build_preview_email(new_permits: list[dict]) -> str:
     rows = ""
     for p in new_permits:
         pid = p["id"]
-        # One-click exclude links — reason in the URL, no form needed
-        ex_base = f"https://getlivewire.com/permit-exclude?pid={pid}"
+        # One-click exclude links — signed, reason in the URL, no form needed
+        sig = _sign_pid(pid)
+        ex_base = f"{config.WP_BASE_URL}/permit-exclude?pid={pid}&sig={sig}"
         exclude_links = (
             f'<a href="{ex_base}&reason=existing_customer" '
             f'style="background:#c0392b;color:#fff;padding:4px 9px;border-radius:3px;'
