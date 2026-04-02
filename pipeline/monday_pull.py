@@ -436,11 +436,14 @@ def run():
     process_exclusions()
 
     # ── Step 3: Determine lookback window ─────────────────────────────────────
+    MIN_LOOKBACK = 7   # Always pull at least 7 days (covers weekly cadence + buffer)
+    MAX_LOOKBACK = 30  # Cap at 30 days to avoid huge scrapes
     app_cfg = db.get_app_config(CUSTOMER_ID)
     if app_cfg and app_cfg["last_monday_run"]:
         since_days = (date.today() - date.fromisoformat(app_cfg["last_monday_run"])).days + 1
     else:
         since_days = 14  # First run: pull 2 weeks back
+    since_days = max(MIN_LOOKBACK, min(since_days, MAX_LOOKBACK))
     log.info("Step 3: Pulling permits from last %d days", since_days)
 
     # ── Step 4: Collect permits from all sources ──────────────────────────────
@@ -471,9 +474,21 @@ def run():
     except Exception as e:
         log.error("Goochland scraper failed: %s", e)
 
-    # Powhatan / Hanover stubs (return [] until portals are identified)
-    powhatan.fetch_permits(since_days=since_days)
-    hanover.fetch_permits(since_days=since_days)
+    # Powhatan — monthly PDF permit logs
+    try:
+        pw_permits = powhatan.fetch_permits(since_days=since_days)
+        all_raw.extend(pw_permits)
+        log.info("Powhatan: %d permits", len(pw_permits))
+    except Exception as e:
+        log.error("Powhatan scraper failed: %s", e)
+
+    # Hanover — monthly PDF recap
+    try:
+        hv_permits = hanover.fetch_permits(since_days=since_days)
+        all_raw.extend(hv_permits)
+        log.info("Hanover: %d permits", len(hv_permits))
+    except Exception as e:
+        log.error("Hanover scraper failed: %s", e)
 
     log.info("Total raw permits collected: %d", len(all_raw))
 
