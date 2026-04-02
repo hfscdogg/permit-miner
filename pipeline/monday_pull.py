@@ -501,8 +501,10 @@ def run():
             continue
         seen_addresses.add(addr_key)
 
-        # Skip companies / LLCs
-        if not owner_is_individual(owner):
+        # Skip companies / LLCs (but allow unknown/empty owners through —
+        # county portals often don't include owner in search results;
+        # owner will be enriched later via assessor lookup or Apollo)
+        if owner and not owner_is_individual(owner):
             total_filtered += 1
             continue
 
