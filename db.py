@@ -329,7 +329,7 @@ def set_app_config_field(field: str, value: str, customer_id: str = "livewire"):
 
 # ── JSON data file helpers ─────────────────────────────────────────────────────
 # These files live in data/ and are committed to the repo.
-# WordPress writes exclusions.json and scans.json; GitHub Actions reads them.
+# Zoho relays scan/exclusion events; local files are a fallback cache.
 
 import json as _json
 import os as _os
@@ -342,7 +342,7 @@ def _data_path(filename: str) -> str:
 
 
 def read_scans() -> list[dict]:
-    """Return list of {pid, timestamp} scan events written by WordPress."""
+    """Return list of {pid, timestamp} scan events."""
     path = _data_path("scans.json")
     try:
         with open(path) as f:
@@ -353,7 +353,7 @@ def read_scans() -> list[dict]:
 
 
 def read_exclusions() -> list[dict]:
-    """Return list of {pid, reason, timestamp} exclusion events written by WordPress."""
+    """Return list of {pid, reason, timestamp} exclusion events."""
     path = _data_path("exclusions.json")
     try:
         with open(path) as f:

@@ -19,14 +19,15 @@
   // --- READ PID FROM URL ---
   var params = new URLSearchParams(window.location.search);
   var pid = params.get('pid');
+  var sig = params.get('sig');
 
-  if (!pid) {
-    // No permit ID - show default content, don't fire webhook
+  if (!pid || !sig) {
+    // No permit ID or signature - show default content, don't fire webhook
     return;
   }
 
   // --- FIRE SCAN WEBHOOK ---
-  fetch(WEBHOOK_URL + '?pid=' + encodeURIComponent(pid), {
+  fetch(WEBHOOK_URL + '?pid=' + encodeURIComponent(pid) + '&sig=' + encodeURIComponent(sig), {
     method: 'GET',
     mode: 'cors'
   })
