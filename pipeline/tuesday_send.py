@@ -119,7 +119,7 @@ def build_digest_email(sent_permits: list[dict], error_count: int) -> str:
     for p in sent_permits:
         phone_html = f'<a href="tel:{p["owner_phone"]}" style="color:#1a2744;">{p["owner_phone"]}</a>' if p.get("owner_phone") else "N/A"
         email_html = f'<a href="mailto:{p["owner_email"]}" style="color:#1a2744;">{p["owner_email"]}</a>' if p.get("owner_email") else "N/A"
-        exclude_url = f"{config.BASE_URL}/exclude?pid={p['id']}"
+        exclude_url = f"{config.WP_BASE_URL}/permit-exclude?pid={p['id']}"
         nc_badge = " <span style='background:#e8943a;color:#fff;padding:2px 5px;border-radius:3px;font-size:10px;'>NEW BUILD</span>" if p.get("is_new_construction") else ""
         touch_badge = f" <span style='background:#6c757d;color:#fff;padding:2px 5px;border-radius:3px;font-size:10px;'>DRIP #{p.get('touch_number',1)}</span>" if p.get("touch_number", 1) > 1 else ""
 
