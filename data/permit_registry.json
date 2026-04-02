@@ -1,1 +1,23 @@
-{}
+{
+  "1356bc035d404cd5": {
+    "owner_name": "",
+    "phone": "",
+    "address": "16943 BARMER RD, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "61f44da77aaf4344": {
+    "owner_name": "",
+    "phone": "",
+    "address": "8712 COPPERLAND DR, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "239084c001794c5c": {
+    "owner_name": "",
+    "phone": "",
+    "address": "436 MICHAUX VIEW TER, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  }
+}
