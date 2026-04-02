@@ -6,18 +6,14 @@ URL: https://aca-prod.accela.com/CHESTERFIELD/
 
 Strategy:
 1. Use Playwright to search the ACA portal for Residential Building permits.
-2. Click "Download results" to get a CSV of all matches (no pagination needed).
-3. Parse the CSV and filter to target ZIPs.
+2. Scrape the results table page by page (5 rows per page).
+3. Parse addresses and filter to target ZIPs.
 
 ZIPs: 23113, 23114, 23146, 23838
 """
-import csv
-import io
 import logging
 import re
-import tempfile
 from datetime import date, timedelta
-from pathlib import Path
 
 import config
 
@@ -33,7 +29,23 @@ RECORD_TYPE_VALUE = "Building/Permit/Residential/NA"
 DATE_FROM_ID = "ctl00_PlaceHolderMain_generalSearchForm_txtGSStartDate"
 DATE_TO_ID = "ctl00_PlaceHolderMain_generalSearchForm_txtGSEndDate"
 SEARCH_BTN_ID = "ctl00_PlaceHolderMain_btnNewSearch"
-DOWNLOAD_LINK_ID = "ctl00_PlaceHolderMain_dgvPermitList_gdvPermitList_gdvPermitListtop4btnExport"
+
+# Results table selectors
+TABLE_ID = "ctl00_PlaceHolderMain_dgvPermitList_gdvPermitList"
+ROW_SELECTOR = "tr.ACA_TabRow_Odd, tr.ACA_TabRow_Even"
+
+# Column indices (0-based, from header inspection):
+# 0: checkbox, 1: Created Date, 2: Record Number, 3: Record Type,
+# 4: Action, 5: Address, 6: Description of Work, 7: Project Name, 8: Status, 9: (hidden)
+COL_DATE = 1
+COL_RECORD_NUM = 2
+COL_RECORD_TYPE = 3
+COL_ADDRESS = 5
+COL_DESCRIPTION = 6
+COL_PROJECT = 7
+COL_STATUS = 8
+
+MAX_PAGES = 20  # Safety limit
 
 
 def fetch_permits(since_days: int = 14) -> list[dict]:
@@ -42,7 +54,7 @@ def fetch_permits(since_days: int = 14) -> list[dict]:
     date_to = date.today().strftime("%m/%d/%Y")
     log.info("Chesterfield: fetching permits %s to %s", date_from, date_to)
 
-    rows = _download_csv_via_playwright(date_from, date_to)
+    rows = _scrape_via_playwright(date_from, date_to)
     if rows is None:
         log.warning("Chesterfield: scrape failed, returning empty list")
         return []
@@ -53,15 +65,14 @@ def fetch_permits(since_days: int = 14) -> list[dict]:
     return filtered
 
 
-def _download_csv_via_playwright(date_from: str, date_to: str) -> list[dict] | None:
+def _scrape_via_playwright(date_from: str, date_to: str) -> list[dict] | None:
     """
     Use Playwright to:
     1. Navigate to ACA Building search
     2. Select 'Residential Building' record type
     3. Fill date range
     4. Click Search
-    5. Click 'Download results' to get CSV
-    6. Parse and return normalized records
+    5. Scrape results table, paginating through all pages
     """
     try:
         from playwright.sync_api import sync_playwright
@@ -69,10 +80,11 @@ def _download_csv_via_playwright(date_from: str, date_to: str) -> list[dict] | N
         log.warning("Playwright not installed — run: pip install playwright && playwright install chromium")
         return None
 
+    all_records = []
+
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
-        context = browser.new_context(accept_downloads=True)
-        page = context.new_page()
+        page = browser.new_page()
         try:
             # Step 1: Navigate to search page
             page.goto(SEARCH_URL, timeout=30000)
@@ -90,64 +102,79 @@ def _download_csv_via_playwright(date_from: str, date_to: str) -> list[dict] | N
             page.wait_for_load_state("networkidle", timeout=30000)
 
             # Verify results appeared
-            results_text = page.text_content("body")
-            if "Record results matching" not in (results_text or ""):
+            body_text = page.text_content("body") or ""
+            if "Record results matching" not in body_text:
                 log.warning("Chesterfield: no results found after search")
                 return []
 
-            # Step 5: Click "Download results" and capture the CSV download
-            with page.expect_download(timeout=30000) as download_info:
-                page.click(f"#{DOWNLOAD_LINK_ID}")
-            download = download_info.value
+            # Step 5: Scrape all pages
+            for page_num in range(1, MAX_PAGES + 1):
+                records = _extract_table_rows(page)
+                all_records.extend(records)
+                log.debug("Chesterfield: page %d — %d rows", page_num, len(records))
 
-            # Save to temp file and parse
-            tmp_path = Path(tempfile.mkdtemp()) / "chesterfield_permits.csv"
-            download.save_as(str(tmp_path))
-            log.info("Chesterfield: CSV downloaded to %s", tmp_path)
+                # Check for Next page link
+                next_link = page.query_selector("a:has-text('Next >')")
+                if not next_link:
+                    break
+                next_link.click()
+                page.wait_for_load_state("networkidle", timeout=15000)
 
-            records = _parse_csv(tmp_path)
-
-            # Cleanup
-            tmp_path.unlink(missing_ok=True)
-            return records
+            log.info("Chesterfield: scraped %d total rows across %d pages",
+                     len(all_records), page_num)
 
         except Exception as e:
             log.error("Chesterfield Playwright scrape failed: %s", e)
+            # Return whatever we've collected so far
+            if all_records:
+                log.info("Chesterfield: returning %d partial results", len(all_records))
+                return all_records
             return None
         finally:
             browser.close()
 
+    return all_records
 
-def _parse_csv(csv_path: Path) -> list[dict]:
-    """Parse the Accela ACA CSV export into normalized permit dicts."""
+
+def _extract_table_rows(page) -> list[dict]:
+    """Extract permit records from the current results page."""
     records = []
-    with open(csv_path, newline="", encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            address_raw = (row.get("Address") or "").strip()
-            if not address_raw or address_raw == "United States":
-                continue
+    table = page.query_selector(f"#{TABLE_ID}")
+    if not table:
+        return records
 
-            parsed = _parse_address(address_raw)
-            if not parsed["zip"]:
-                continue
+    rows = table.query_selector_all(ROW_SELECTOR)
+    for row in rows:
+        cells = row.query_selector_all("td")
+        if len(cells) < 9:
+            continue
 
-            records.append({
-                "source": "Chesterfield",
-                "permit_number": (row.get("Record Number") or "").strip(),
-                "permit_type": (row.get("Record Type") or "").strip(),
-                "property_address": parsed["street"],
-                "property_city": parsed["city"],
-                "property_state": "VA",
-                "property_zip": parsed["zip"],
-                "description": (row.get("Description of Work") or "").strip(),
-                "file_date": _parse_date(row.get("Created Date", "")),
-                "project_name": (row.get("Project Name") or "").strip(),
-                "status": (row.get("Status") or "").strip(),
-                "job_value_dollars": 0,
-                "owner_name": "",
-                "contractor_name": "",
-            })
+        texts = [c.inner_text().strip() for c in cells]
+
+        address_raw = texts[COL_ADDRESS]
+        if not address_raw or address_raw == "United States":
+            continue
+
+        parsed = _parse_address(address_raw)
+        if not parsed["zip"]:
+            continue
+
+        records.append({
+            "source": "Chesterfield",
+            "permit_number": texts[COL_RECORD_NUM],
+            "permit_type": texts[COL_RECORD_TYPE],
+            "property_address": parsed["street"],
+            "property_city": parsed["city"],
+            "property_state": "VA",
+            "property_zip": parsed["zip"],
+            "description": texts[COL_DESCRIPTION],
+            "file_date": _parse_date(texts[COL_DATE]),
+            "project_name": texts[COL_PROJECT],
+            "status": texts[COL_STATUS],
+            "job_value_dollars": 0,
+            "owner_name": "",
+            "contractor_name": "",
+        })
 
     return records
 
@@ -155,7 +182,7 @@ def _parse_csv(csv_path: Path) -> list[dict]:
 def _parse_address(raw: str) -> dict:
     """
     Parse Accela address format: '5409 QUALLA TRACE TER, Chesterfield VA 23832'
-    Returns dict with street, city, state, zip.
+    Returns dict with street, city, zip.
     """
     # Pattern: street, city STATE zip
     match = re.match(r"^(.+?),\s*(.+?)\s+VA\s+(\d{5})\s*$", raw, re.IGNORECASE)
