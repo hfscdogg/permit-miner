@@ -505,7 +505,15 @@ def run():
         address = (p.get("property_address") or "").strip()
         zip_code = (p.get("property_zip") or "")[:5]
 
-        if not address or not zip_code:
+        if not address:
+            total_filtered += 1
+            continue
+
+        # Powhatan PDFs don't include ZIP — assign based on county
+        if not zip_code and p.get("source") == "Powhatan":
+            zip_code = "23139"  # Default Powhatan ZIP (largest area)
+            p["property_zip"] = zip_code
+        elif not zip_code:
             total_filtered += 1
             continue
 

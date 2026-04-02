@@ -25,7 +25,7 @@ jobs:
       - name: Run Tuesday send
         env:
           APOLLO_API_KEY:         ${{ secrets.APOLLO_API_KEY }}
-          PERMIT_MINER_API_KEY:   ${{ secrets.PERMIT_MINER_API_KEY }}
+          PERMIT_MINER_HMAC_SECRET: ${{ secrets.PERMIT_MINER_HMAC_SECRET }}
           LOB_LIVE_KEY:           ${{ secrets.LOB_LIVE_KEY }}
           LOB_TEST_KEY:           ${{ secrets.LOB_TEST_KEY }}
           SMTP_HOST:              ${{ secrets.SMTP_HOST }}
@@ -45,6 +45,9 @@ jobs:
           LOB_TEMPLATE_BACK_ID:   ${{ secrets.LOB_TEMPLATE_BACK_ID }}
           LOB_DRIP_TEMPLATE_FRONT_ID: ${{ secrets.LOB_DRIP_TEMPLATE_FRONT_ID }}
           LOB_DRIP_TEMPLATE_BACK_ID:  ${{ secrets.LOB_DRIP_TEMPLATE_BACK_ID }}
+          WP_BASE_URL:            ${{ secrets.WP_BASE_URL }}
+          ZOHO_WEBHOOK_URL:       ${{ secrets.ZOHO_WEBHOOK_URL }}
+          ZOHO_API_TOKEN:         ${{ secrets.ZOHO_API_TOKEN }}
           MODE:                   ${{ secrets.MODE }}
           DB_PATH:                permit_miner.db
         run: python -m pipeline.tuesday_send
