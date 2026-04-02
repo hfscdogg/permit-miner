@@ -113,11 +113,12 @@ def _scrape_via_playwright(date_from: str, date_to: str) -> list[dict] | None:
                 all_records.extend(records)
                 log.debug("Chesterfield: page %d — %d rows", page_num, len(records))
 
-                # Check for Next page link
-                next_link = page.query_selector("a:has-text('Next >')")
-                if not next_link:
+                # Check for Next page link and click via selector
+                # (can't reuse element handle — ASP.NET postback replaces the DOM)
+                next_selector = "a:has-text('Next >')"
+                if not page.query_selector(next_selector):
                     break
-                next_link.click()
+                page.click(next_selector)
                 page.wait_for_load_state("networkidle", timeout=15000)
 
             log.info("Chesterfield: scraped %d total rows across %d pages",
