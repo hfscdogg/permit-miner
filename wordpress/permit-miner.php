@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: Permit Miner
- * Description: Stateless inbound endpoints for the Permit Miner lead-gen system.
- * Version: 2.0
+ * Description: Inbound endpoints for the Permit Miner lead-gen system.
+ * Version: 2.1
  *
  * Deploy to: wp-content/mu-plugins/permit-miner.php
  *
@@ -10,9 +10,9 @@
  *   GET /permit-exclude?pid=xxx&reason=existing_customer&sig=yyy
  *   GET /permit-scan?pid=xxx&sig=yyy
  *
- * This plugin validates inbound requests and returns minimal responses.
- * No local files, no wp_options, no email, no outbound API calls.
- * All state lives in the Python pipeline's SQLite database.
+ * Exclusions are written to a JSON file that the Tuesday pipeline fetches.
+ * Scans are written to a JSON file that the Monday pipeline reads.
+ * Registry data lives in data/permit_registry.json in the GitHub repo.
  *
  * Required wp-config.php constant:
  *   PERMIT_MINER_HMAC_SECRET — shared secret for signing pid URLs
@@ -25,6 +25,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 // ── Config (from wp-config.php) ─────────────────────────────────────────────
 
 define( 'PM_HMAC_SECRET', defined( 'PERMIT_MINER_HMAC_SECRET' ) ? PERMIT_MINER_HMAC_SECRET : '' );
+
+// Data directory for exclusion/scan JSON files
+define( 'PM_DATA_DIR', WP_CONTENT_DIR . '/uploads/permit-miner/' );
 
 // Rate limit: max requests per IP within the window (seconds)
 define( 'PM_RATE_LIMIT_MAX',    30 );
@@ -146,6 +149,38 @@ function pm_validate_request(): string {
 }
 
 
+// ── Data file helpers ────────────────────────────────────────────────────────
+
+/**
+ * Ensure data directory exists.
+ */
+function pm_ensure_data_dir() {
+    if ( ! file_exists( PM_DATA_DIR ) ) {
+        wp_mkdir_p( PM_DATA_DIR );
+    }
+}
+
+/**
+ * Append a JSON record to a file (one JSON array per file).
+ */
+function pm_append_json( string $filename, array $record ) {
+    pm_ensure_data_dir();
+    $path = PM_DATA_DIR . $filename;
+
+    $data = [];
+    if ( file_exists( $path ) ) {
+        $contents = file_get_contents( $path );
+        $decoded  = json_decode( $contents, true );
+        if ( is_array( $decoded ) ) {
+            $data = $decoded;
+        }
+    }
+
+    $data[] = $record;
+    file_put_contents( $path, json_encode( $data, JSON_PRETTY_PRINT ), LOCK_EX );
+}
+
+
 // ── /permit-exclude ──────────────────────────────────────────────────────────
 // GET /permit-exclude?pid=xxx&reason=existing_customer&sig=yyy
 
@@ -157,6 +192,13 @@ function pm_handle_exclude() {
     if ( ! in_array( $reason, $valid_reasons, true ) ) {
         $reason = 'unspecified';
     }
+
+    // Write exclusion to JSON file for Tuesday pipeline to pick up
+    pm_append_json( 'exclusions.json', [
+        'pid'       => $pid,
+        'reason'    => $reason,
+        'timestamp' => gmdate( 'c' ),
+    ] );
 
     // Return branded confirmation page
     http_response_code( 200 );
@@ -179,7 +221,12 @@ function pm_handle_exclude() {
 function pm_handle_scan() {
     $pid = pm_validate_request();
 
-    // Validated successfully -- return minimal acknowledgment
+    // Write scan event to JSON file for Monday pipeline to pick up
+    pm_append_json( 'scans.json', [
+        'pid'       => $pid,
+        'timestamp' => gmdate( 'c' ),
+    ] );
+
     wp_send_json( [
         'status' => 'ok',
     ] );

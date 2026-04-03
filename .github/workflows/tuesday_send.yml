@@ -46,8 +46,6 @@ jobs:
           LOB_DRIP_TEMPLATE_FRONT_ID: ${{ secrets.LOB_DRIP_TEMPLATE_FRONT_ID }}
           LOB_DRIP_TEMPLATE_BACK_ID:  ${{ secrets.LOB_DRIP_TEMPLATE_BACK_ID }}
           WP_BASE_URL:            ${{ secrets.WP_BASE_URL }}
-          ZOHO_WEBHOOK_URL:       ${{ secrets.ZOHO_WEBHOOK_URL }}
-          ZOHO_API_TOKEN:         ${{ secrets.ZOHO_API_TOKEN }}
           MODE:                   ${{ secrets.MODE }}
           DB_PATH:                permit_miner.db
         run: python -m pipeline.tuesday_send

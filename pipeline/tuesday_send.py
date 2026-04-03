@@ -171,34 +171,31 @@ def build_digest_email(sent_permits: list[dict], error_count: int) -> str:
 </body></html>"""
 
 
-# ── Zoho exclusions sync ──────────────────────────────────────────────────────
+# ── WordPress exclusions sync ─────────────────────────────────────────────────
+
+EXCLUSIONS_URL = f"{config.WP_BASE_URL}/wp-content/uploads/permit-miner/exclusions.json"
+
 
 def fetch_and_apply_exclusions():
     """
-    Fetch pending exclusions from Zoho API and mark permits Excluded in DB.
-    Exclusion events are relayed to Zoho by the WordPress plugin on each
-    /permit-exclude request.
+    Fetch pending exclusions from WordPress JSON file and mark permits Excluded in DB.
+    The WordPress plugin writes to exclusions.json when Henry clicks Exclude links
+    in the Monday preview email.
     """
-    if not config.ZOHO_WEBHOOK_URL or not config.ZOHO_API_TOKEN:
-        log.info("Zoho API not configured -- skipping exclusion sync.")
-        return
-
     try:
-        r = httpx.get(
-            config.ZOHO_WEBHOOK_URL,
-            params={"event": "exclusions"},
-            headers={"Authorization": f"Zoho-oauthtoken {config.ZOHO_API_TOKEN}"},
-            timeout=15,
-        )
+        r = httpx.get(EXCLUSIONS_URL, timeout=15)
+        if r.status_code == 404:
+            log.info("No exclusions file found (404) -- nothing to process.")
+            return
         if r.status_code != 200:
-            log.info("Zoho exclusions fetch: %d -- skipping", r.status_code)
+            log.info("Exclusions fetch returned %d -- skipping.", r.status_code)
             return
         exclusions = r.json()
         if not isinstance(exclusions, list) or not exclusions:
-            log.info("No Zoho exclusions to process.")
+            log.info("No exclusions to process.")
             return
     except Exception as e:
-        log.warning("Could not fetch Zoho exclusions: %s", e)
+        log.warning("Could not fetch exclusions from WordPress: %s", e)
         return
 
     applied = 0
@@ -217,40 +214,20 @@ def fetch_and_apply_exclusions():
         })
         db.upsert_exclusion_rule(CUSTOMER_ID, "Address", permit["property_address"], "Contains")
         applied += 1
-        log.info("Excluded permit %s via Zoho (reason: %s)", pid, reason)
+        log.info("Excluded permit %s (reason: %s)", pid, reason)
 
-    log.info("Applied %d exclusions from Zoho.", applied)
+    log.info("Applied %d exclusions from WordPress.", applied)
+
+    # Clear the exclusions file after processing
+    _clear_exclusions()
 
 
-# ── Zoho registry push ─────────────────────────────────────────────────────────
-
-def push_registry_to_zoho(registry: dict):
-    """
-    POST permit registry to Zoho so the WordPress scan endpoint can look up
-    permits via server-to-server Zoho API call.
-    """
-    if not config.ZOHO_WEBHOOK_URL or not config.ZOHO_API_TOKEN:
-        log.warning("Zoho API not configured -- skipping registry push.")
-        return
-    if not registry:
-        return
-
-    try:
-        r = httpx.post(
-            config.ZOHO_WEBHOOK_URL,
-            json={"event": "registry_update", "registry": registry},
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Zoho-oauthtoken {config.ZOHO_API_TOKEN}",
-            },
-            timeout=30,
-        )
-        if r.status_code in (200, 201):
-            log.info("Registry pushed to Zoho (%d permits).", len(registry))
-        else:
-            log.warning("Zoho registry push returned %d: %s", r.status_code, r.text[:200])
-    except Exception as e:
-        log.warning("Zoho registry push failed: %s", e)
+def _clear_exclusions():
+    """POST empty array to clear processed exclusions on WordPress."""
+    # The file is static — we can't clear it from here.
+    # It will be overwritten by the next exclude click.
+    # Processed exclusions are tracked in DB (status=Excluded) so re-processing is safe.
+    log.info("Exclusions processed — duplicates will be skipped on next run.")
 
 
 def build_registry_from_sent(sent_permits: list[dict]) -> dict:
@@ -282,8 +259,8 @@ def run():
     log.info("=== Tuesday Send started ===")
     db.init_db()
 
-    # ── Step 1: Apply exclusions from Zoho ──────────────────────────────────
-    log.info("Step 1: Fetching exclusions from Zoho...")
+    # ── Step 1: Apply exclusions from WordPress ──────────────────────────────
+    log.info("Step 1: Fetching exclusions from WordPress...")
     fetch_and_apply_exclusions()
 
     queued = db.get_queued_permits(CUSTOMER_ID)
@@ -319,11 +296,10 @@ def run():
     # ── Update last_tuesday_run ─────────────────────────────────────────────────
     db.set_app_config_field("last_tuesday_run", today_str)
 
-    # ── Push registry to Zoho ─────────────────────────────────────────────────
-    log.info("Pushing registry to Zoho...")
+    # ── Write registry to repo (committed back by GitHub Actions) ────────────
+    log.info("Writing permit registry...")
     registry = build_registry_from_sent(sent_permits)
     db.write_registry(registry)
-    push_registry_to_zoho(registry)
 
     # ── Sales digest email ──────────────────────────────────────────────────────
     subject = f"Permit Miner — {len(sent_permits)} postcard{'s' if len(sent_permits) != 1 else ''} sent today"

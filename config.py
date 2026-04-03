@@ -103,11 +103,8 @@ HENRICO_KEYWORDS = [
 # data.virginia.gov building permit dataset (may cover all counties)
 VA_STATE_CSV_URL = "https://data.virginia.gov/api/views/5y87-nuwi/rows.csv?accessType=DOWNLOAD"
 
-# ── WordPress / Zoho endpoints ────────────────────────────────────────────────
+# ── WordPress endpoints ───────────────────────────────────────────────────────
 WP_BASE_URL             = os.getenv("WP_BASE_URL", "https://getlivewire.com")
-ZOHO_WEBHOOK_URL        = os.getenv("ZOHO_WEBHOOK_URL", "")      # Zoho Creator webhook for scan/exclude events
-ZOHO_LOOKUP_URL         = os.getenv("ZOHO_LOOKUP_URL", "")       # Zoho Creator API for permit lookups
-ZOHO_API_TOKEN          = os.getenv("ZOHO_API_TOKEN", "")        # Zoho OAuth token
 
 # ── Secrets (from .env) ───────────────────────────────────────────────────────
 APOLLO_API_KEY          = os.getenv("APOLLO_API_KEY", "")
