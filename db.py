@@ -329,7 +329,7 @@ def set_app_config_field(field: str, value: str, customer_id: str = "livewire"):
 
 # ── JSON data file helpers ─────────────────────────────────────────────────────
 # These files live in data/ and are committed to the repo.
-# Zoho relays scan/exclusion events; local files are a fallback cache.
+# WordPress writes scan/exclusion JSON files; pipeline fetches them via HTTP.
 
 import json as _json
 import os as _os

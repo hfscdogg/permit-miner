@@ -1,9 +1,9 @@
 """
 tuesday_send.py — Permit Miner Tuesday 8AM pipeline.
 
-1. Fetch exclusions from Zoho → mark excluded permits in DB
+1. Fetch exclusions from WordPress → mark excluded permits in DB
 2. Send Lob postcards for Queued + Drip Queued permits
-3. Push updated permit registry to Zoho (for stateless scan lookups)
+3. Write updated permit registry to repo (committed by GitHub Actions)
 4. Email Henry and sales team a digest
 
 Run:  python -m pipeline.tuesday_send

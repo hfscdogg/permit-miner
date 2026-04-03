@@ -1,13 +1,14 @@
 """
 monday_pull.py — Permit Miner Monday 8AM pipeline (no-Shovels).
 
-1. Read scan events (from Zoho) → mark permits Engaged
-2. Pull permits from county scrapers + Virginia state CSV
-3. Filter by owner type, value, permit type
-4. Enrich contacts via Apollo API
-5. Insert Queued records in SQLite
-6. Write data/permit_registry.json (for Zoho scan lookups)
-7. Send Monday preview email with signed one-click Exclude links
+1. Read scan events (from WordPress) → mark permits Engaged
+2. Read exclusion events (from WordPress) → mark permits Excluded
+3. Pull permits from county scrapers
+4. Filter by owner type, value, permit type
+5. Enrich contacts via Apollo API
+6. Insert Queued records in SQLite
+7. Write data/permit_registry.json (for WordPress scan lookups)
+8. Send Monday preview email with signed one-click Exclude links
 
 Run:  python -m pipeline.monday_pull
 Cron: 0 13 * * 1  (8AM ET = 13:00 UTC, Monday)
@@ -159,11 +160,31 @@ def enrich_via_apollo(owner_name: str, city: str = "Richmond", state: str = "VA"
         return {}
 
 
-# ── Scan processing (from Zoho) ───────────────────────────────────────────────
+# ── Scan processing (from WordPress) ──────────────────────────────────────────
+
+SCANS_URL = f"{config.WP_BASE_URL}/wp-content/uploads/permit-miner/scans.json"
+EXCLUSIONS_URL = f"{config.WP_BASE_URL}/wp-content/uploads/permit-miner/exclusions.json"
+
+
+def _fetch_wp_json(url: str) -> list[dict]:
+    """Fetch a JSON array from a WordPress uploads URL. Returns [] on failure."""
+    try:
+        r = httpx.get(url, timeout=15)
+        if r.status_code == 404:
+            return []
+        if r.status_code != 200:
+            log.info("Fetch %s returned %d -- skipping.", url, r.status_code)
+            return []
+        data = r.json()
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        log.warning("Could not fetch %s: %s", url, e)
+        return []
+
 
 def process_scans():
-    """Fetch scan events from Zoho and mark permits as Engaged in DB."""
-    scans = db.read_scans()
+    """Fetch scan events from WordPress and mark permits as Engaged in DB."""
+    scans = _fetch_wp_json(SCANS_URL)
     if not scans:
         log.info("No new scans to process.")
         return
@@ -193,11 +214,11 @@ def process_scans():
     log.info("Processed %d scan events → %d permits marked Engaged", len(scans), engaged)
 
 
-# ── Exclusion processing (from Zoho) ──────────────────────────────────────────
+# ── Exclusion processing (from WordPress) ─────────────────────────────────────
 
 def process_exclusions():
-    """Fetch exclusions from Zoho and mark those permits as Excluded in DB."""
-    exclusions = db.read_exclusions()
+    """Fetch exclusions from WordPress and mark those permits as Excluded in DB."""
+    exclusions = _fetch_wp_json(EXCLUSIONS_URL)
     if not exclusions:
         return
 
@@ -226,7 +247,7 @@ def process_exclusions():
 def build_and_write_registry():
     """
     Write permit_registry.json: {pid: {owner_name, phone, address, permit_type}}
-    Includes all Sent + Engaged permits. Zoho reads this for scan lookups.
+    Includes all Sent + Engaged permits. WordPress reads this for scan alert emails.
     """
     with db.get_conn() as conn:
         rows = conn.execute(
