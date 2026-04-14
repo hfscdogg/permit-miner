@@ -236,5 +236,103 @@
     "address": "9220 Wyattwood RD, Hanover 23005",
     "permit_type": "Residential Building",
     "is_new_construction": false
+  },
+  "faecf48921ce4a4f": {
+    "owner_name": "",
+    "phone": "",
+    "address": "1312 BRAISDEN RD, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "78e2d8e4d2ff4e97": {
+    "owner_name": "",
+    "phone": "",
+    "address": "11954 CARTERS GARDEN TER, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "d6d57dda41c94fec": {
+    "owner_name": "",
+    "phone": "",
+    "address": "13018 ALSANDAIR DR, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "3aa89b4570db4f07": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2930 BARROW PL, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "f8531893a68f4492": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12812 GLENGATE RD, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "464c96d335d14af3": {
+    "owner_name": "",
+    "phone": "",
+    "address": "13137 SODBURY DR, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "8dda877e2c5c4207": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2721 BOSHAM LN, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "73f44fac253543ba": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14312 DERBY RIDGE CT, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "92f21c2890e24ed3": {
+    "owner_name": "",
+    "phone": "",
+    "address": "1301 WALTON CREEK DR, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "04cd1ea280754986": {
+    "owner_name": "",
+    "phone": "",
+    "address": "13532 KINGSMILL RD, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "a8f2f379b8a34a20": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14606 FELBRIDGE WAY, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "216531ea3321436e": {
+    "owner_name": "",
+    "phone": "",
+    "address": "3624 MARKBY TRACE VW, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "aa65ba84e0534024": {
+    "owner_name": "",
+    "phone": "",
+    "address": "1911 OAKENGATE LN, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "ba3239ce3b414a77": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2512 MICHAUX VALLEY WAY, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
   }
 }
