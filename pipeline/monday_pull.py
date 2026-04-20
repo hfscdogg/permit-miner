@@ -279,6 +279,7 @@ def build_and_write_registry():
         }
 
     db.write_registry(registry)
+    db.push_registry_to_wordpress(registry)
     log.info("Registry written with %d permits.", len(registry))
     return registry
 

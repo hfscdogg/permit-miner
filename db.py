@@ -369,3 +369,32 @@ def write_registry(registry: dict):
     _os.makedirs(DATA_DIR, exist_ok=True)
     with open(path, "w") as f:
         _json.dump(registry, f, indent=2)
+
+
+def push_registry_to_wordpress(registry: dict) -> bool:
+    """POST the registry to WordPress so the scan endpoint can personalize
+    PURL landing pages. Non-fatal: logs and returns False if WP is down or
+    the secret is missing — the local file on disk is the source of truth."""
+    import logging as _logging
+    import httpx as _httpx
+
+    log = _logging.getLogger(__name__)
+
+    if not config.PERMIT_MINER_HMAC_SECRET:
+        log.warning("PERMIT_MINER_HMAC_SECRET unset — skipping registry push.")
+        return False
+
+    url = f"{config.WP_BASE_URL.rstrip('/')}/permit-registry"
+    try:
+        r = _httpx.post(
+            url,
+            json=registry,
+            headers={"X-Permit-Miner-Auth": config.PERMIT_MINER_HMAC_SECRET},
+            timeout=30,
+        )
+        r.raise_for_status()
+        log.info("Pushed registry to %s (%d permits).", url, len(registry))
+        return True
+    except Exception as e:
+        log.warning("Registry push to %s failed: %s", url, e)
+        return False

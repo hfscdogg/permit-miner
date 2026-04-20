@@ -344,6 +344,7 @@ def run():
     log.info("Writing permit registry...")
     registry = build_registry_from_sent(sent_permits)
     db.write_registry(registry)
+    db.push_registry_to_wordpress(registry)
 
     # ── Sales digest email ──────────────────────────────────────────────────────
     subject = f"Permit Miner — {len(sent_permits)} postcard{'s' if len(sent_permits) != 1 else ''} sent today"

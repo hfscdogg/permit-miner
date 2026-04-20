@@ -2,20 +2,23 @@
 /**
  * Plugin Name: Permit Miner
  * Description: Inbound endpoints for the Permit Miner lead-gen system.
- * Version: 2.1
+ * Version: 2.2
  *
  * Deploy to: wp-content/mu-plugins/permit-miner.php
  *
  * Endpoints:
- *   GET /permit-exclude?pid=xxx&reason=existing_customer&sig=yyy
- *   GET /permit-scan?pid=xxx&sig=yyy
+ *   GET  /permit-exclude?pid=xxx&reason=existing_customer&sig=yyy
+ *   GET  /permit-scan?pid=xxx&sig=yyy
+ *   POST /permit-registry  (header: X-Permit-Miner-Auth: <secret>)
  *
  * Exclusions are written to a JSON file that the Tuesday pipeline fetches.
  * Scans are written to a JSON file that the Monday pipeline reads.
- * Registry data lives in data/permit_registry.json in the GitHub repo.
+ * Registry data is POSTed here by the pipeline after each Monday/Tuesday run
+ * and cached locally; the scan endpoint reads it to personalize PURL content.
  *
  * Required wp-config.php constant:
- *   PERMIT_MINER_HMAC_SECRET — shared secret for signing pid URLs
+ *   PERMIT_MINER_HMAC_SECRET — shared secret for signing pid URLs and
+ *                              authenticating registry uploads
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
@@ -45,8 +48,9 @@ add_action( 'init', 'pm_register_endpoints' );
 // ── Endpoint registration ────────────────────────────────────────────────────
 
 function pm_register_endpoints() {
-    add_rewrite_rule( '^permit-exclude/?$', 'index.php?pm_action=exclude', 'top' );
-    add_rewrite_rule( '^permit-scan/?$',    'index.php?pm_action=scan',    'top' );
+    add_rewrite_rule( '^permit-exclude/?$',  'index.php?pm_action=exclude',  'top' );
+    add_rewrite_rule( '^permit-scan/?$',     'index.php?pm_action=scan',     'top' );
+    add_rewrite_rule( '^permit-registry/?$', 'index.php?pm_action=registry', 'top' );
     add_rewrite_tag( '%pm_action%', '([^&]+)' );
 }
 
@@ -63,6 +67,9 @@ function pm_handle_request() {
             break;
         case 'scan':
             pm_handle_scan();
+            break;
+        case 'registry':
+            pm_handle_registry_upload();
             break;
     }
     exit;
@@ -227,7 +234,88 @@ function pm_handle_scan() {
         'timestamp' => gmdate( 'c' ),
     ] );
 
-    wp_send_json( [
-        'status' => 'ok',
-    ] );
+    // Look up the permit so the PURL JS can personalize the landing page.
+    // Missing entries (permit hasn't shipped yet, or registry not synced)
+    // degrade to the default landing page content — not an error.
+    $permit = pm_lookup_permit( $pid );
+
+    $response = [ 'status' => 'ok' ];
+    if ( $permit ) {
+        $response['permit_type']         = (string) ( $permit['permit_type'] ?? '' );
+        $response['permit_tags']         = $permit['permit_tags'] ?? [];
+        $response['segment']             = (string) ( $permit['segment'] ?? '' );
+        $response['is_new_construction'] = (bool)   ( $permit['is_new_construction'] ?? false );
+    }
+    wp_send_json( $response );
+}
+
+
+// ── /permit-registry (upload) ────────────────────────────────────────────────
+// POST /permit-registry
+// Header: X-Permit-Miner-Auth: <PERMIT_MINER_HMAC_SECRET>
+// Body: JSON object keyed by permit id
+
+function pm_handle_registry_upload() {
+    if ( ( $_SERVER['REQUEST_METHOD'] ?? 'GET' ) !== 'POST' ) {
+        http_response_code( 405 );
+        header( 'Content-Type: application/json; charset=utf-8' );
+        echo json_encode( [ 'status' => 'error', 'message' => 'POST required' ] );
+        exit;
+    }
+
+    if ( ! PM_HMAC_SECRET ) {
+        http_response_code( 500 );
+        header( 'Content-Type: application/json; charset=utf-8' );
+        echo json_encode( [ 'status' => 'error', 'message' => 'Server missing secret' ] );
+        exit;
+    }
+
+    $provided = $_SERVER['HTTP_X_PERMIT_MINER_AUTH'] ?? '';
+    if ( ! $provided || ! hash_equals( PM_HMAC_SECRET, $provided ) ) {
+        http_response_code( 403 );
+        header( 'Content-Type: application/json; charset=utf-8' );
+        echo json_encode( [ 'status' => 'error', 'message' => 'Invalid auth' ] );
+        exit;
+    }
+
+    $body    = file_get_contents( 'php://input' );
+    $decoded = json_decode( $body, true );
+    if ( ! is_array( $decoded ) ) {
+        http_response_code( 400 );
+        header( 'Content-Type: application/json; charset=utf-8' );
+        echo json_encode( [ 'status' => 'error', 'message' => 'Invalid JSON body' ] );
+        exit;
+    }
+
+    pm_ensure_data_dir();
+    $path = PM_DATA_DIR . 'permit_registry.json';
+    $tmp  = $path . '.tmp';
+    if ( file_put_contents( $tmp, json_encode( $decoded ), LOCK_EX ) === false
+         || ! rename( $tmp, $path ) ) {
+        http_response_code( 500 );
+        header( 'Content-Type: application/json; charset=utf-8' );
+        echo json_encode( [ 'status' => 'error', 'message' => 'Write failed' ] );
+        exit;
+    }
+
+    wp_send_json( [ 'status' => 'ok', 'count' => count( $decoded ) ] );
+}
+
+
+// ── Registry lookup helper ───────────────────────────────────────────────────
+
+function pm_lookup_permit( string $pid ) {
+    $path = PM_DATA_DIR . 'permit_registry.json';
+    if ( ! file_exists( $path ) ) {
+        return null;
+    }
+    $raw = file_get_contents( $path );
+    if ( ! $raw ) {
+        return null;
+    }
+    $registry = json_decode( $raw, true );
+    if ( ! is_array( $registry ) ) {
+        return null;
+    }
+    return $registry[ $pid ] ?? null;
 }
