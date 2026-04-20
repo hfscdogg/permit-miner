@@ -25,7 +25,12 @@ import db
 from pipeline.mailer import send_email
 from pipeline.scrapers import virginia_state, chesterfield, goochland, powhatan, hanover
 from pipeline.scrapers.assessor import get_assessed_value
-from pipeline.segmentation import classify_permit, tags_to_json
+from pipeline.segmentation import (
+    classify_permit,
+    resolve_segment,
+    tags_from_json,
+    tags_to_json,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -253,19 +258,24 @@ def build_and_write_registry():
     with db.get_conn() as conn:
         rows = conn.execute(
             "SELECT id, owner_name, owner_phone, property_address, "
-            "       property_city, property_zip, permit_type, is_new_construction "
+            "       property_city, property_zip, permit_type, permit_tags, "
+            "       is_new_construction "
             "FROM permits WHERE customer_id=? AND status IN ('Sent','Drip Sent','Engaged')",
             (CUSTOMER_ID,),
         ).fetchall()
 
     registry = {}
     for r in rows:
+        tags = tags_from_json(r["permit_tags"])
+        is_new = bool(r["is_new_construction"])
         registry[r["id"]] = {
             "owner_name":        r["owner_name"] or "",
             "phone":             r["owner_phone"] or "",
             "address":           f"{r['property_address'] or ''}, {r['property_city'] or ''} {r['property_zip'] or ''}".strip(", "),
             "permit_type":       r["permit_type"] or "",
-            "is_new_construction": bool(r["is_new_construction"]),
+            "permit_tags":       tags,
+            "segment":           resolve_segment(tags, is_new),
+            "is_new_construction": is_new,
         }
 
     db.write_registry(registry)
