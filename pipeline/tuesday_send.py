@@ -19,6 +19,26 @@ import httpx
 import config
 import db
 from pipeline.mailer import send_email
+from pipeline.segmentation import (
+    resolve_segment,
+    resolve_value_tier,
+    tags_from_json,
+)
+
+
+SEGMENT_LABELS = {
+    "new_construction": "New Build",
+    "major_remodel":    "Remodel",
+    "kitchen_bath":     "Kitchen/Bath",
+    "outdoor_living":   "Outdoor",
+    "default":          "General",
+}
+
+
+def resolve_permit_segment(permit: dict) -> str:
+    """Compute the segment for a permit row (dict or sqlite3.Row-as-dict)."""
+    tags = tags_from_json(permit.get("permit_tags"))
+    return resolve_segment(tags, bool(permit.get("is_new_construction")))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,11 +66,19 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
     # Split into first name for greeting
     first_name = owner_name.split()[0].title() if owner_name else "Homeowner"
 
-    front_template = config.LOB_DRIP_TEMPLATE_FRONT_ID if is_drip else config.LOB_TEMPLATE_FRONT_ID
-    back_template  = config.LOB_DRIP_TEMPLATE_BACK_ID  if is_drip else config.LOB_TEMPLATE_BACK_ID
+    segment = resolve_permit_segment(permit)
+    templates = config.LOB_DRIP_TEMPLATES if is_drip else config.LOB_TEMPLATES
+    tpl = templates.get(segment) or templates["default"]
+    front_template = tpl["front"]
+    back_template  = tpl["back"]
+
+    value_tier = resolve_value_tier(
+        permit.get("job_value_cents"),
+        permit.get("assessed_value_cents"),
+    )
 
     payload = {
-        "description": f"Permit Miner — {permit['id']}",
+        "description": f"Permit Miner — {permit['id']} [{segment}]",
         "size": config.POSTCARD_SIZE,
         "front": front_template,
         "back":  back_template,
@@ -77,6 +105,12 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
             "address_state":  permit.get("property_state", "VA"),
             "address_zip":    permit.get("property_zip", ""),
             "qr_url":         permit.get("purl_url", ""),
+            "segment":        segment,
+            "segment_label":  SEGMENT_LABELS.get(segment, "General"),
+            "value_tier":     value_tier,
+            "owner_type":     permit.get("owner_type") or "individual",
+            "county":         permit.get("source") or "",
+            "contractor_name": permit.get("contractor_name") or "",
         },
     }
 
@@ -121,11 +155,16 @@ def build_digest_email(sent_permits: list[dict], error_count: int) -> str:
         email_html = f'<a href="mailto:{p["owner_email"]}" style="color:#1a2744;">{p["owner_email"]}</a>' if p.get("owner_email") else "N/A"
         nc_badge = " <span style='background:#e8943a;color:#fff;padding:2px 5px;border-radius:3px;font-size:10px;'>NEW BUILD</span>" if p.get("is_new_construction") else ""
         touch_badge = f" <span style='background:#6c757d;color:#fff;padding:2px 5px;border-radius:3px;font-size:10px;'>DRIP #{p.get('touch_number',1)}</span>" if p.get("touch_number", 1) > 1 else ""
+        segment = resolve_permit_segment(p)
+        segment_badge = (
+            f" <span style='background:#2d6cdf;color:#fff;padding:2px 5px;border-radius:3px;font-size:10px;'>{SEGMENT_LABELS.get(segment, 'General').upper()}</span>"
+            if segment != "default" and not p.get("is_new_construction") else ""
+        )
 
         rows += f"""
         <tr style="border-bottom:1px solid #f0f0f0;">
           <td style="padding:10px 8px;">
-            <strong>{p.get('owner_name') or 'Unknown'}</strong>{nc_badge}{touch_badge}<br>
+            <strong>{p.get('owner_name') or 'Unknown'}</strong>{nc_badge}{segment_badge}{touch_badge}<br>
             <span style="font-size:11px;color:#666;">{p.get('property_address','')} · {p.get('property_zip','')}</span>
           </td>
           <td style="padding:10px 8px;font-size:12px;">{p.get('permit_type') or 'N/A'}</td>

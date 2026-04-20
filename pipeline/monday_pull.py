@@ -25,6 +25,7 @@ import db
 from pipeline.mailer import send_email
 from pipeline.scrapers import virginia_state, chesterfield, goochland, powhatan, hanover
 from pipeline.scrapers.assessor import get_assessed_value
+from pipeline.segmentation import classify_permit, tags_to_json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -569,7 +570,8 @@ def run():
             total_filtered += 1
             continue
 
-        # Exclusion rule check
+        # Exclusion rule check — still matches against the raw description
+        # so existing Keyword rules keep working.
         if db.is_excluded_by_rules({
             "contractor_name": p.get("contractor_name"),
             "permit_type": p.get("permit_type"),
@@ -583,6 +585,12 @@ def run():
         # Apollo enrichment
         contact = enrich_via_apollo(owner, p.get("property_city", "Richmond"), "VA")
 
+        tags = classify_permit(
+            p.get("description", ""),
+            p.get("permit_type", ""),
+            new_const,
+        )
+
         permit_data = {
             "customer_id":           CUSTOMER_ID,
             "source":                p.get("source", "County Portal"),
@@ -592,7 +600,7 @@ def run():
             "property_zip":          zip_code,
             "assessed_value_cents":  int(assessed) * 100,
             "permit_type":           p.get("permit_type", ""),
-            "permit_tags":           p.get("description", ""),
+            "permit_tags":           tags_to_json(tags),
             "is_new_construction":   new_const,
             "file_date":             p.get("file_date", ""),
             "job_value_cents":       int(p.get("job_value_dollars") or 0) * 100,

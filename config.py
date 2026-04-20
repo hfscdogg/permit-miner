@@ -135,6 +135,24 @@ LOB_TEMPLATE_BACK_ID        = os.getenv("LOB_TEMPLATE_BACK_ID", "")
 LOB_DRIP_TEMPLATE_FRONT_ID  = os.getenv("LOB_DRIP_TEMPLATE_FRONT_ID", "") or LOB_TEMPLATE_FRONT_ID
 LOB_DRIP_TEMPLATE_BACK_ID   = os.getenv("LOB_DRIP_TEMPLATE_BACK_ID", "") or LOB_TEMPLATE_BACK_ID
 
+# Per-segment Lob template IDs. Unset vars fall back to the generic template
+# above, so the system stays functional until each segment's template exists.
+def _segment_templates(prefix: str) -> dict[str, dict[str, str]]:
+    default_front = LOB_DRIP_TEMPLATE_FRONT_ID if prefix == "DRIP" else LOB_TEMPLATE_FRONT_ID
+    default_back  = LOB_DRIP_TEMPLATE_BACK_ID  if prefix == "DRIP" else LOB_TEMPLATE_BACK_ID
+    env = lambda key, fallback: os.getenv(key, "") or fallback
+    p = f"LOB_{prefix}_" if prefix else "LOB_"
+    return {
+        "new_construction": {"front": env(f"{p}NC_FRONT", default_front), "back": env(f"{p}NC_BACK", default_back)},
+        "major_remodel":    {"front": env(f"{p}MR_FRONT", default_front), "back": env(f"{p}MR_BACK", default_back)},
+        "kitchen_bath":     {"front": env(f"{p}KB_FRONT", default_front), "back": env(f"{p}KB_BACK", default_back)},
+        "outdoor_living":   {"front": env(f"{p}OL_FRONT", default_front), "back": env(f"{p}OL_BACK", default_back)},
+        "default":          {"front": default_front, "back": default_back},
+    }
+
+LOB_TEMPLATES       = _segment_templates("")       # First-touch
+LOB_DRIP_TEMPLATES  = _segment_templates("DRIP")   # Drip / second-touch
+
 MODE                    = os.getenv("MODE", "test")   # "test" | "live"
 DB_PATH                 = os.getenv("DB_PATH", "permit_miner.db")
 
