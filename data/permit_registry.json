@@ -334,5 +334,61 @@
     "address": "2512 MICHAUX VALLEY WAY, Midlothian 23113",
     "permit_type": "Residential Building",
     "is_new_construction": false
+  },
+  "2fd364747b2641a6": {
+    "owner_name": "",
+    "phone": "",
+    "address": "16925 BARMER RD, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "fef45290165441bc": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14807 COLONY FOREST PL, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "3086dac67ec64ff0": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14225 CAMACK TRL, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "b7a6eb3d59ab4fb3": {
+    "owner_name": "",
+    "phone": "",
+    "address": "513 TOTTEN DR, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "8b8ee7f4b8554cb4": {
+    "owner_name": "",
+    "phone": "",
+    "address": "10006 BOSCHEN WOODS PL, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "7441eef3f60c481b": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12100 BUNDLE RD, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "2806353fc9c34138": {
+    "owner_name": "",
+    "phone": "",
+    "address": "9931 BOSCHEN WOODS PL, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "33ab24ddc29f47d2": {
+    "owner_name": "",
+    "phone": "",
+    "address": "630 COALBROOK DR, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
   }
 }
