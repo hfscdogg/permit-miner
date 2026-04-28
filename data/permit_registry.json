@@ -1,4 +1,25 @@
 {
+  "85e5ffdbc8514569": {
+    "owner_name": "",
+    "phone": "",
+    "address": "16943 BARMER RD__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "fcbd11293f7e4973": {
+    "owner_name": "",
+    "phone": "",
+    "address": "8712 COPPERLAND DR__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "fe52df9796fa4d69": {
+    "owner_name": "",
+    "phone": "",
+    "address": "436 MICHAUX VIEW TER__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
   "1356bc035d404cd5": {
     "owner_name": "",
     "phone": "",
@@ -388,6 +409,90 @@
     "owner_name": "",
     "phone": "",
     "address": "630 COALBROOK DR, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "8312064abdf84620": {
+    "owner_name": "",
+    "phone": "",
+    "address": "15001 CHESDIN GREEN WAY, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "d6ceefb8a2cf40e7": {
+    "owner_name": "",
+    "phone": "",
+    "address": "413 TOTTEN DR, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "ee73398a5a0948da": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2904 SWEETSPIRE RDG, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "40be47be7e184bd2": {
+    "owner_name": "",
+    "phone": "",
+    "address": "8007 CLANCY PL, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "fb6fca623d514bff": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12706 LAKESTONE DR, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "5745a255c385410a": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12860 KILLYCROM DR, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "d32af735200944d6": {
+    "owner_name": "",
+    "phone": "",
+    "address": "1107 ROYAL RIDGE RD, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "a5b27fa698354afc": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14900 PADDLE CREEK CT, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "0bf8be3ca5b04982": {
+    "owner_name": "",
+    "phone": "",
+    "address": "20300 RIVER RD, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "da33a13027bc497e": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14212 FOX HURST CT, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "b69d459c2e954123": {
+    "owner_name": "",
+    "phone": "",
+    "address": "8201 ALDERA LN, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "ccb5d359dc844c72": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14318 RIVERDOWNS SOUTH DR, Midlothian 23113",
     "permit_type": "Residential Building",
     "is_new_construction": false
   }
