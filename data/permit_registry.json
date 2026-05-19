@@ -335,6 +335,62 @@
     "permit_type": "Residential Building",
     "is_new_construction": false
   },
+  "2c89c622b0f14dc8": {
+    "owner_name": "",
+    "phone": "",
+    "address": "16925 BARMER RD__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "9766928e229243c9": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14807 COLONY FOREST PL__drip2, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "4a5d281cbeca4195": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14225 CAMACK TRL__drip2, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "019c7e9d71f74d49": {
+    "owner_name": "",
+    "phone": "",
+    "address": "513 TOTTEN DR__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "245ae927b974464f": {
+    "owner_name": "",
+    "phone": "",
+    "address": "10006 BOSCHEN WOODS PL__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "52a4a54541ac4254": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12100 BUNDLE RD__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "9d98ea7c09ce48a4": {
+    "owner_name": "",
+    "phone": "",
+    "address": "9931 BOSCHEN WOODS PL__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "b687845c892340d2": {
+    "owner_name": "",
+    "phone": "",
+    "address": "630 COALBROOK DR__drip2, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
   "1356bc035d404cd5": {
     "owner_name": "",
     "phone": "",
@@ -920,6 +976,34 @@
     "owner_name": "",
     "phone": "",
     "address": "2101 HEATHLAND DR, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "48a301e303a344e1": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14112 THORNEY CT, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "58306c5c3d974b30": {
+    "owner_name": "",
+    "phone": "",
+    "address": "13218 BALTA CT, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "814b2009da594038": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14112 SHAWHAN PL, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "db0c9755a07e413e": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2670 KENTFORD RD, Midlothian 23113",
     "permit_type": "Residential Building",
     "is_new_construction": false
   }
