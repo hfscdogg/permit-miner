@@ -391,6 +391,20 @@
     "permit_type": "Residential Building",
     "is_new_construction": false
   },
+  "4aacefda2b6346cf": {
+    "owner_name": "John Smith",
+    "phone": "804-555-0101",
+    "address": "100 River Rd, Richmond 23229",
+    "permit_type": "New Single Family Dwelling",
+    "is_new_construction": true
+  },
+  "9f9890ed9f704d35": {
+    "owner_name": "Bob Wilson",
+    "phone": "804-555-0303",
+    "address": "300 Patterson Ave, Richmond 23226",
+    "permit_type": "Inground Pool Construction",
+    "is_new_construction": false
+  },
   "1356bc035d404cd5": {
     "owner_name": "",
     "phone": "",
@@ -1007,25 +1021,11 @@
     "permit_type": "Residential Building",
     "is_new_construction": false
   },
-  "4aacefda2b6346cf": {
-    "owner_name": "John Smith",
-    "phone": "804-555-0101",
-    "address": "100 River Rd, Richmond 23229",
-    "permit_type": "New Single Family Dwelling",
-    "is_new_construction": true
-  },
   "3870e2f31ac4481c": {
     "owner_name": "Jane Doe",
     "phone": "",
     "address": "200 Monument Ave, Richmond 23226",
     "permit_type": "Kitchen and Bath Remodel",
-    "is_new_construction": false
-  },
-  "9f9890ed9f704d35": {
-    "owner_name": "Bob Wilson",
-    "phone": "804-555-0303",
-    "address": "300 Patterson Ave, Richmond 23226",
-    "permit_type": "Inground Pool Construction",
     "is_new_construction": false
   },
   "ba1cdf7209c64075": {
