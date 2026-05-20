@@ -14,7 +14,7 @@
 
   // --- CONFIG ---
   // WordPress endpoint on getlivewire.com (registered by permit-miner.php mu-plugin)
-  var WEBHOOK_URL = 'https://getlivewire.com/permit-scan';
+  var WEBHOOK_URL = 'https://www.getlivewire.com/permit-scan';
 
   // --- READ PID FROM URL ---
   var params = new URLSearchParams(window.location.search);
