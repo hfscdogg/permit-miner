@@ -391,6 +391,90 @@
     "permit_type": "Residential Building",
     "is_new_construction": false
   },
+  "dbb6481d675f42ce": {
+    "owner_name": "",
+    "phone": "",
+    "address": "15001 CHESDIN GREEN WAY__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "2695873b21b54395": {
+    "owner_name": "",
+    "phone": "",
+    "address": "413 TOTTEN DR__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "f355ad749ded4e9d": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2904 SWEETSPIRE RDG__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "9b3984e179f64d3d": {
+    "owner_name": "",
+    "phone": "",
+    "address": "8007 CLANCY PL__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": true
+  },
+  "69fd2c0388bf4f80": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12706 LAKESTONE DR__drip2, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "960d8f23b3674f01": {
+    "owner_name": "",
+    "phone": "",
+    "address": "12860 KILLYCROM DR__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "de7093b545434153": {
+    "owner_name": "",
+    "phone": "",
+    "address": "1107 ROYAL RIDGE RD__drip2, Midlothian 23114",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "97dc72222f214c07": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14900 PADDLE CREEK CT__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "2880846e51d1485e": {
+    "owner_name": "",
+    "phone": "",
+    "address": "20300 RIVER RD__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "6f230f203d574d3e": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14212 FOX HURST CT__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "ed772f170af94343": {
+    "owner_name": "",
+    "phone": "",
+    "address": "8201 ALDERA LN__drip2, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "8bb0034cc14145a5": {
+    "owner_name": "",
+    "phone": "",
+    "address": "14318 RIVERDOWNS SOUTH DR__drip2, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
   "1356bc035d404cd5": {
     "owner_name": "",
     "phone": "",
@@ -1004,6 +1088,34 @@
     "owner_name": "",
     "phone": "",
     "address": "2670 KENTFORD RD, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "a357359a304b4811": {
+    "owner_name": "",
+    "phone": "",
+    "address": "3218 FULBROOK DR, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "424c2eec3b434348": {
+    "owner_name": "",
+    "phone": "",
+    "address": "3030 SUMMERHURST DR, Midlothian 23113",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "9d106a7883a74b38": {
+    "owner_name": "",
+    "phone": "",
+    "address": "6804 AMSTEL BLUFF WAY, Chesterfield 23838",
+    "permit_type": "Residential Building",
+    "is_new_construction": false
+  },
+  "0e2136669eae4bd7": {
+    "owner_name": "",
+    "phone": "",
+    "address": "2300 CRANBORNE RD, Midlothian 23113",
     "permit_type": "Residential Building",
     "is_new_construction": false
   }
