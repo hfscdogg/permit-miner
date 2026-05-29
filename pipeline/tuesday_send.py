@@ -75,6 +75,7 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
 
     payload = {
         "description": f"Permit Miner — {permit['id']}",
+        "use_type": "marketing",
         "size": config.POSTCARD_SIZE,
         "front": front_template,
         "back":  back_template,
