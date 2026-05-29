@@ -119,8 +119,9 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
         log.info("Lob postcard sent: %s → %s", permit["id"], postcard_id)
         return True, postcard_id, tracking_url
     except httpx.HTTPStatusError as e:
-        log.error("Lob API error for permit %s: %s — %s", permit["id"], e, e.response.text)
-        return False, "", str(e)
+        body = e.response.text
+        log.error("Lob API error for permit %s: %s — %s", permit["id"], e, body)
+        return False, "", f"{e} | {body}"
     except Exception as e:
         log.error("Lob send failed for permit %s: %s", permit["id"], e)
         return False, "", str(e)
