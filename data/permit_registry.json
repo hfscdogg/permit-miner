@@ -1006,5 +1006,12 @@
     "address": "2670 KENTFORD RD, Midlothian 23113",
     "permit_type": "Residential Building",
     "is_new_construction": false
+  },
+  "2bfbbd42ef1e4329": {
+    "owner_name": "Henry Clifford",
+    "phone": "",
+    "address": "12619 GRENDON DR, Midlothian 23113",
+    "permit_type": "New Single Family Dwelling",
+    "is_new_construction": true
   }
 }
