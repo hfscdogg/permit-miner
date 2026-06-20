@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 from datetime import date
+from urllib.parse import quote
 
 import httpx
 
@@ -97,7 +98,7 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
         },
         "merge_variables": {
             "name":           first_name,
-            "qr_url":         permit.get("purl_url", ""),
+            "qr_url":         f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(permit.get('purl_url', ''), safe='')}",
         },
     }
 
