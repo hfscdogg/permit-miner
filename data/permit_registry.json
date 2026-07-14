@@ -1091,32 +1091,11 @@
     "permit_type": "Residential Building",
     "is_new_construction": false
   },
-  "a357359a304b4811": {
-    "owner_name": "",
+  "2bfbbd42ef1e4329": {
+    "owner_name": "Henry Clifford",
     "phone": "",
-    "address": "3218 FULBROOK DR, Midlothian 23113",
-    "permit_type": "Residential Building",
-    "is_new_construction": false
-  },
-  "424c2eec3b434348": {
-    "owner_name": "",
-    "phone": "",
-    "address": "3030 SUMMERHURST DR, Midlothian 23113",
-    "permit_type": "Residential Building",
-    "is_new_construction": false
-  },
-  "9d106a7883a74b38": {
-    "owner_name": "",
-    "phone": "",
-    "address": "6804 AMSTEL BLUFF WAY, Chesterfield 23838",
-    "permit_type": "Residential Building",
-    "is_new_construction": false
-  },
-  "0e2136669eae4bd7": {
-    "owner_name": "",
-    "phone": "",
-    "address": "2300 CRANBORNE RD, Midlothian 23113",
-    "permit_type": "Residential Building",
-    "is_new_construction": false
+    "address": "12619 GRENDON DR, Midlothian 23113",
+    "permit_type": "New Single Family Dwelling",
+    "is_new_construction": true
   }
 }

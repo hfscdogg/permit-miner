@@ -13,6 +13,7 @@ import base64
 import json
 import logging
 from datetime import date
+from urllib.parse import quote
 
 import httpx
 
@@ -37,20 +38,45 @@ def lob_auth_header() -> dict:
     return {"Authorization": f"Basic {token}", "Content-Type": "application/json"}
 
 
+def select_template(permit: dict) -> tuple[str, str]:
+    """Pick the Lob template pair (front, back) based on permit type/tags."""
+    tags = (permit.get("permit_tags") or "").lower()
+    ptype = (permit.get("permit_type") or "").lower()
+    is_new = permit.get("is_new_construction")
+
+    if is_new or "new_construction" in tags or "new" in ptype:
+        key = "new_construction"
+    elif "pool" in tags or "deck" in tags or "patio" in tags or "outdoor" in ptype:
+        key = "outdoor_living"
+    elif "kitchen" in ptype or "bath" in ptype or "kitchen" in tags or "bath" in tags:
+        key = "kitchen_bath"
+    elif "remodel" in tags or "addition" in tags or "renovation" in ptype:
+        key = "major_remodel"
+    else:
+        key = "generic"
+
+    front, back = config.LOB_TEMPLATES.get(key, config.LOB_TEMPLATES["generic"])
+    log.info("Template selected for %s: %s", permit["id"], key)
+    return front, back
+
+
 def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, str]:
     """
     POST a postcard to Lob. Returns (success, postcard_id, tracking_url).
     In test mode uses test API key (Lob won't actually print).
     """
     owner_name = permit["owner_name"] or "Homeowner"
-    # Split into first name for greeting
     first_name = owner_name.split()[0].title() if owner_name else "Homeowner"
 
-    front_template = config.LOB_DRIP_TEMPLATE_FRONT_ID if is_drip else config.LOB_TEMPLATE_FRONT_ID
-    back_template  = config.LOB_DRIP_TEMPLATE_BACK_ID  if is_drip else config.LOB_TEMPLATE_BACK_ID
+    if is_drip:
+        front_template = config.LOB_DRIP_TEMPLATE_FRONT_ID
+        back_template  = config.LOB_DRIP_TEMPLATE_BACK_ID
+    else:
+        front_template, back_template = select_template(permit)
 
     payload = {
         "description": f"Permit Miner — {permit['id']}",
+        "use_type": "marketing",
         "size": config.POSTCARD_SIZE,
         "front": front_template,
         "back":  back_template,
@@ -72,11 +98,7 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
         },
         "merge_variables": {
             "name":           first_name,
-            "address_line1":  permit.get("property_address", "").split(",")[0].strip(),
-            "address_city":   permit.get("property_city", ""),
-            "address_state":  permit.get("property_state", "VA"),
-            "address_zip":    permit.get("property_zip", ""),
-            "qr_url":         permit.get("purl_url", ""),
+            "qr_url":         f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(permit.get('purl_url', ''), safe='')}",
         },
     }
 
@@ -99,8 +121,9 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
         log.info("Lob postcard sent: %s → %s", permit["id"], postcard_id)
         return True, postcard_id, tracking_url
     except httpx.HTTPStatusError as e:
-        log.error("Lob API error for permit %s: %s — %s", permit["id"], e, e.response.text)
-        return False, "", str(e)
+        body = e.response.text
+        log.error("Lob API error for permit %s: %s — %s", permit["id"], e, body)
+        return False, "", f"{e} | {body}"
     except Exception as e:
         log.error("Lob send failed for permit %s: %s", permit["id"], e)
         return False, "", str(e)

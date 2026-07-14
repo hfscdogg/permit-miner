@@ -17,6 +17,7 @@ import json
 import logging
 import sys
 from datetime import date, timedelta
+from urllib.parse import quote
 
 import httpx
 
@@ -284,18 +285,42 @@ def _sign_pid(permit_id: str) -> str:
     ).hexdigest()
 
 
-def build_purl_url(permit_id: str, is_drip: bool = False) -> str:
+def classify_permit_type(permit: dict) -> str:
+    """Return a short permit type key for the PURL landing page content swap."""
+    tags = (permit.get("permit_tags") or "").lower()
+    ptype = (permit.get("permit_type") or "").lower()
+    if permit.get("is_new_construction") or "new_construction" in tags or "new" in ptype:
+        return "new_construction"
+    if "pool" in tags or "deck" in tags or "patio" in tags or "outdoor" in ptype:
+        return "outdoor"
+    if "kitchen" in ptype or "bath" in ptype or "kitchen" in tags or "bath" in tags:
+        return "kitchen_bath"
+    if "remodel" in tags or "addition" in tags or "renovation" in ptype:
+        return "remodel"
+    return "general"
+
+
+def build_purl_url(permit_id: str, permit: dict = None, is_drip: bool = False) -> str:
     campaign = "luxury_permits_drip" if is_drip else "luxury_permits"
     sig = _sign_pid(permit_id)
-    return (
+    ptype = classify_permit_type(permit) if permit else "general"
+    owner = (permit or {}).get("owner_name", "") or ""
+    fname = owner.split()[0].title() if owner else ""
+    url = (
         f"{config.PURL_BASE_URL}"
         f"?pid={permit_id}"
         f"&sig={sig}"
+        f"&ptype={ptype}"
+    )
+    if fname:
+        url += f"&fname={quote(fname, safe='')}"
+    url += (
         f"&utm_source=permit_miner"
         f"&utm_medium=direct_mail"
         f"&utm_campaign={campaign}"
         f"&utm_content={permit_id}"
     )
+    return url
 
 
 # ── Drip check ────────────────────────────────────────────────────────────────
@@ -321,7 +346,7 @@ def run_drip_check():
             continue
 
         drip_id = db.new_id()
-        purl_url = build_purl_url(drip_id, is_drip=True)
+        purl_url = build_purl_url(drip_id, permit=dict(p), is_drip=True)
         ts = db.now_iso()
         with db.get_conn() as conn:
             conn.execute(
@@ -487,7 +512,7 @@ def run():
     except Exception as e:
         log.error("Chesterfield scraper failed: %s", e)
 
-    # Goochland — EnerGov portal
+    # Goochland — monthly Permits Issued PDFs (Archive Center)
     try:
         gl_permits = goochland.fetch_permits(since_days=since_days)
         all_raw.extend(gl_permits)
@@ -607,7 +632,7 @@ def run():
 
         inserted, permit_id = db.upsert_permit(permit_data)
         if inserted:
-            purl = build_purl_url(permit_id)
+            purl = build_purl_url(permit_id, permit=permit_data)
             db.set_permit_status(permit_id, "Queued", {"purl_url": purl})
             permit_data["id"] = permit_id
             permit_data["purl_url"] = purl

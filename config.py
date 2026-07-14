@@ -135,6 +135,31 @@ LOB_TEMPLATE_BACK_ID        = os.getenv("LOB_TEMPLATE_BACK_ID", "")
 LOB_DRIP_TEMPLATE_FRONT_ID  = os.getenv("LOB_DRIP_TEMPLATE_FRONT_ID", "") or LOB_TEMPLATE_FRONT_ID
 LOB_DRIP_TEMPLATE_BACK_ID   = os.getenv("LOB_DRIP_TEMPLATE_BACK_ID", "") or LOB_TEMPLATE_BACK_ID
 
+# ── Per-permit-type Lob templates ─────────────────────────────────────────────
+# Each key maps to a (front_id, back_id) tuple. Selection logic in tuesday_send.py.
+LOB_TEMPLATES = {
+    "new_construction": (
+        os.getenv("LOB_TMPL_NEW_CONSTRUCTION_FRONT", "tmpl_b3c90f49418910b"),
+        os.getenv("LOB_TMPL_NEW_CONSTRUCTION_BACK",  "tmpl_8207d53a9874956"),
+    ),
+    "kitchen_bath": (
+        os.getenv("LOB_TMPL_KITCHEN_BATH_FRONT", "tmpl_2d12823f63a7889"),
+        os.getenv("LOB_TMPL_KITCHEN_BATH_BACK",  "tmpl_424c156e3b13102"),
+    ),
+    "outdoor_living": (
+        os.getenv("LOB_TMPL_OUTDOOR_LIVING_FRONT", "tmpl_1793ea84d4ba680"),
+        os.getenv("LOB_TMPL_OUTDOOR_LIVING_BACK",  "tmpl_8d920e96a06b150"),
+    ),
+    "major_remodel": (
+        os.getenv("LOB_TMPL_MAJOR_REMODEL_FRONT", "tmpl_345eb43a1f6a96f"),
+        os.getenv("LOB_TMPL_MAJOR_REMODEL_BACK",  "tmpl_a4eb6a4b0622c88"),
+    ),
+    "generic": (
+        os.getenv("LOB_TMPL_GENERIC_FRONT", "tmpl_efe31a0670c5331"),
+        os.getenv("LOB_TMPL_GENERIC_BACK",  "tmpl_8da18f22b097c88"),
+    ),
+}
+
 MODE                    = os.getenv("MODE", "test")   # "test" | "live"
 DB_PATH                 = os.getenv("DB_PATH", "permit_miner.db")
 
