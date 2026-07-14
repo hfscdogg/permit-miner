@@ -144,7 +144,7 @@ def _extract_report_items(html: str) -> list[tuple[str, str]]:
 
 
 def _parse_pdf(content: bytes) -> list[dict]:
-    """Extract permit records — tables first, text lines as fallback."""
+    """Extract permit records — tables first, text lines, then OCR fallback."""
     records: list[dict] = []
     full_text = ""
 
@@ -157,10 +157,45 @@ def _parse_pdf(content: bytes) -> list[dict]:
             if text:
                 full_text += text + "\n"
 
+    if not records and not full_text.strip():
+        # Goochland reports are scanned images with no text layer — OCR them.
+        full_text = _ocr_pdf(content)
+
     if not records and full_text:
         records = _parse_text_lines(full_text)
 
     return records
+
+
+def _ocr_pdf(content: bytes) -> str:
+    """
+    Render each page with pypdfium2 (a pdfplumber dependency) and OCR
+    with tesseract. Requires the tesseract-ocr binary + pytesseract
+    (installed in the GitHub Actions workflows).
+    """
+    try:
+        import pypdfium2 as pdfium
+        import pytesseract
+    except ImportError as e:
+        log.error("Goochland: OCR unavailable (%s) — scanned PDF skipped", e)
+        return ""
+
+    text_parts = []
+    try:
+        pdf = pdfium.PdfDocument(io.BytesIO(content))
+        for i, page in enumerate(pdf):
+            bitmap = page.render(scale=300 / 72)  # 300 DPI
+            image = bitmap.to_pil()
+            # PSM 6: assume a uniform block of text — best for tabular reports
+            text_parts.append(pytesseract.image_to_string(image, config="--psm 6"))
+        pdf.close()
+    except Exception as e:
+        log.error("Goochland: OCR failed: %s", e)
+        return ""
+
+    text = "\n".join(text_parts)
+    log.info("Goochland: OCR extracted %d chars from %d pages", len(text), len(text_parts))
+    return text
 
 
 def _parse_table_rows(table: list[list]) -> list[dict]:
@@ -342,16 +377,25 @@ def _debug():
         print(r.content[:500])
         return
 
+    has_text = False
     with pdfplumber.open(io.BytesIO(r.content)) as pdf:
         print(f"\n=== PDF has {len(pdf.pages)} pages ===")
         for i, page in enumerate(pdf.pages[:3]):
             print(f"\n--- Page {i+1} raw text ---")
-            print(page.extract_text() or "(no text extracted)")
+            text = page.extract_text()
+            if text:
+                has_text = True
+            print(text or "(no text extracted)")
             table = page.extract_table()
             if table:
                 print(f"\n--- Page {i+1} table ({len(table)} rows) ---")
                 for row in table[:8]:
                     print(f"  {row}")
+
+    if not has_text:
+        print("\n=== No text layer — OCR output (first 2 pages worth) ===")
+        ocr_text = _ocr_pdf(r.content)
+        print(ocr_text[:6000] or "(OCR produced nothing)")
 
     records = _parse_pdf(r.content)
     print(f"\n=== Parsed {len(records)} records ===")

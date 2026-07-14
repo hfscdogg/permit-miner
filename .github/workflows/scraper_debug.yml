@@ -20,8 +20,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install tesseract OCR
+        run: sudo apt-get update && sudo apt-get install -y tesseract-ocr
+
       - name: Install dependencies
-        run: pip install httpx pdfplumber python-dotenv
+        run: pip install httpx pdfplumber python-dotenv pytesseract
 
       - name: Run scraper debug
         run: python -m pipeline.scrapers.${{ inputs.scraper }}
