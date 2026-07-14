@@ -37,9 +37,15 @@ BASE_URL = "https://www.spotsylvania.va.us"
 TARGET_ZIPS = config.SPOTSYLVANIA_ZIPS
 
 CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
-# Virginia's state composite locator — far better VA coverage than Census
-VGIN_GEOCODER = ("https://gismaps.vita.virginia.gov/arcgis/rest/services/Geocoding/"
-                 "VGIN_Composite_Locator/GeocodeServer/findAddressCandidates")
+# Virginia's state composite locator (VGIN, hosted by VDEM) — candidate
+# endpoints tried in order; hostnames have moved over the years
+VGIN_GEOCODERS = [
+    "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/Geocoding/"
+    "VA_Composite_Locator/GeocodeServer/findAddressCandidates",
+    "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/Geocoding/"
+    "VGIN_Composite_Locator/GeocodeServer/findAddressCandidates",
+]
+NOMINATIM = "https://nominatim.openstreetmap.org/search"
 GEOCODE_CAP = 80  # per run — bounds latency; log when hit
 
 HEADERS = {
@@ -336,39 +342,73 @@ def _geocode_zip(street: str, verbose: bool = False) -> tuple[str, str]:
     z, city = _vgin_lookup(street, verbose)
     if z:
         return z, city
+    z, city = _nominatim_lookup(street, verbose)
+    if z:
+        return z, city
     return _census_lookup(street, verbose)
 
 
 def _vgin_lookup(street: str, verbose: bool = False) -> tuple[str, str]:
     """Virginia state composite locator — resolves nearly all VA addresses."""
+    for url in VGIN_GEOCODERS:
+        try:
+            r = httpx.get(url, params={
+                "SingleLine": f"{street}, SPOTSYLVANIA COUNTY, VA",
+                "outFields": "*",
+                "maxLocations": "1",
+                "f": "json",
+            }, headers=HEADERS, timeout=20)
+            if verbose:
+                print(f"    [vgin {street!r}] HTTP {r.status_code} :: {r.text[:250]}")
+            r.raise_for_status()
+            candidates = r.json().get("candidates", [])
+            if candidates:
+                cand = candidates[0]
+                addr = cand.get("address", "")
+                attrs = cand.get("attributes", {}) or {}
+                z = attrs.get("Postal") or ""
+                if not z:
+                    zm = re.search(r"\b(\d{5})\b", addr)
+                    z = zm.group(1) if zm else ""
+                city = attrs.get("City") or ""
+                if not city:
+                    cm = re.search(r",\s*([A-Za-z ]+),\s*(?:VA|VIRGINIA)", addr)
+                    city = cm.group(1).strip() if cm else ""
+                if z:
+                    return z, city.title()
+        except Exception as e:
+            log.warning("Spotsylvania: VGIN geocode failed for %s: %s", street, e)
+            if verbose:
+                print(f"    [vgin {street!r}] EXCEPTION: {e}")
+    return "", ""
+
+
+def _nominatim_lookup(street: str, verbose: bool = False) -> tuple[str, str]:
+    """OpenStreetMap Nominatim — 1 req/sec per usage policy."""
+    import time
+    time.sleep(1.1)
     try:
-        r = httpx.get(VGIN_GEOCODER, params={
-            "SingleLine": f"{street}, SPOTSYLVANIA COUNTY, VA",
-            "outFields": "*",
-            "maxLocations": "1",
-            "f": "json",
-        }, headers=HEADERS, timeout=20)
+        r = httpx.get(NOMINATIM, params={
+            "q": f"{street}, Spotsylvania County, Virginia, USA",
+            "format": "json",
+            "addressdetails": "1",
+            "limit": "1",
+            "countrycodes": "us",
+        }, headers={"User-Agent": "PermitMiner/1.0 (henry@getlivewire.com)"}, timeout=20)
         if verbose:
-            print(f"    [vgin {street!r}] HTTP {r.status_code} :: {r.text[:250]}")
+            print(f"    [osm {street!r}] HTTP {r.status_code} :: {r.text[:250]}")
         r.raise_for_status()
-        candidates = r.json().get("candidates", [])
-        if candidates:
-            cand = candidates[0]
-            addr = cand.get("address", "")
-            attrs = cand.get("attributes", {}) or {}
-            z = attrs.get("Postal") or ""
-            if not z:
-                zm = re.search(r"\b(\d{5})\b", addr)
-                z = zm.group(1) if zm else ""
-            city = attrs.get("City") or ""
-            if not city:
-                cm = re.search(r",\s*([A-Za-z ]+),\s*(?:VA|VIRGINIA)", addr)
-                city = cm.group(1).strip() if cm else ""
+        results = r.json()
+        if results:
+            addr = results[0].get("address", {}) or {}
+            z = (addr.get("postcode") or "")[:5]
+            city = (addr.get("town") or addr.get("city") or addr.get("village")
+                    or addr.get("hamlet") or "")
             return z, city.title()
     except Exception as e:
-        log.warning("Spotsylvania: VGIN geocode failed for %s: %s", street, e)
+        log.warning("Spotsylvania: Nominatim geocode failed for %s: %s", street, e)
         if verbose:
-            print(f"    [vgin {street!r}] EXCEPTION: {e}")
+            print(f"    [osm {street!r}] EXCEPTION: {e}")
     return "", ""
 
 

@@ -24,7 +24,8 @@ import httpx
 import config
 import db
 from pipeline.mailer import send_email
-from pipeline.scrapers import virginia_state, chesterfield, goochland, powhatan, hanover, spotsylvania
+from pipeline.scrapers import (virginia_state, chesterfield, goochland, powhatan,
+                               hanover, spotsylvania, albemarle, fredericksburg)
 from pipeline.scrapers.assessor import get_assessed_value
 
 logging.basicConfig(
@@ -549,6 +550,22 @@ def run():
         log.info("Spotsylvania: %d permits", len(sp_permits))
     except Exception as e:
         log.error("Spotsylvania scraper failed: %s", e)
+
+    # Albemarle — EnerGov portal (Charlottesville metro)
+    try:
+        ab_permits = albemarle.fetch_permits(since_days=since_days)
+        all_raw.extend(ab_permits)
+        log.info("Albemarle: %d permits", len(ab_permits))
+    except Exception as e:
+        log.error("Albemarle scraper failed: %s", e)
+
+    # Fredericksburg (city) — EnerGov portal
+    try:
+        fb_permits = fredericksburg.fetch_permits(since_days=since_days)
+        all_raw.extend(fb_permits)
+        log.info("Fredericksburg: %d permits", len(fb_permits))
+    except Exception as e:
+        log.error("Fredericksburg scraper failed: %s", e)
 
     log.info("Total raw permits collected: %d", len(all_raw))
 

@@ -50,6 +50,14 @@ HANOVER_ZIPS = {"23005", "23116"}
 # Spotsylvania ZIPs — monthly permit report PDFs
 SPOTSYLVANIA_ZIPS = {"22407", "22553"}
 
+# Albemarle County ZIPs — EnerGov portal (Charlottesville-metro territory)
+ALBEMARLE_ZIPS = {"22901", "22911", "22947"}
+
+# City of Fredericksburg ZIPs — EnerGov portal covers city limits (22401).
+# Note: territory's 22406 is the Stafford County side of Fredericksburg
+# postal addresses — not reachable via the city portal.
+FREDERICKSBURG_ZIPS = {"22401"}
+
 # ── Owner type detection ──────────────────────────────────────────────────────
 # If any of these patterns appear in owner_name, skip — it's a company/LLC.
 COMPANY_PATTERNS = [

@@ -48,6 +48,9 @@ def fetch_permits_for(source: str, target_zips: set, since_days: int = 14) -> li
 
     records = []
     for row in rows:
+        status = (row.get("status") or "").lower()
+        if any(bad in status for bad in ("denied", "expired", "void", "withdrawn")):
+            continue
         parsed = _parse_address(row.get("address", ""))
         if parsed["zip"] not in target_zips:
             continue
@@ -125,6 +128,15 @@ def _scrape(base: str, date_from: str, date_to: str) -> list[dict] | None:
             page.wait_for_load_state("networkidle", timeout=30000)
             page.wait_for_timeout(2000)
 
+            # Bump page size to 100 to minimize pagination
+            size_sel = page.query_selector("#pageSizeList")
+            if size_sel:
+                try:
+                    size_sel.select_option(value="100")
+                    page.wait_for_timeout(2500)
+                except Exception:
+                    pass
+
             for page_num in range(1, MAX_PAGES + 1):
                 batch = _extract_results(page)
                 results.extend(batch)
@@ -152,58 +164,64 @@ def _select_option_by_label(page, select_el, label: str):
             return
 
 
-def _extract_results(page) -> list[dict]:
-    """
-    Result cards in CSS render as repeated blocks with labeled fields.
-    Extract number / type / address / date / description generically:
-    each card contains a link to permit detail (#/permit/<guid>).
-    """
-    records = []
-    cards = page.query_selector_all("[name='label-SearchResultModel'], .search-result, "
-                                    "div[id^='entityRecordDiv']")
-    if not cards:
-        # Fallback: any element containing a permit detail link
-        cards = page.query_selector_all("div:has(> a[href*='#/permit/'])")
+# Card lines are label-prefixed (confirmed via 2026-07-14 debug run):
+#   Permit Number OTH-2026-00007 / Type Building - ... / Issued Date 06/30/2026
+#   Status Issued / Address 6550 ROSELAND FARM CROZET VA 22932 / Description ...
+CARD_FIELDS = [
+    ("Permit Number", "number"),
+    ("Issued Date", "date"),        # before bare "Type"/"Status" checks
+    ("Type", "type"),
+    ("Status", "status"),
+    ("Address", "address"),
+    ("Description", "description"),
+]
 
-    for card in cards:
+
+def _extract_results(page) -> list[dict]:
+    records = []
+    for card in page.query_selector_all("div[id^='entityRecordDiv']"):
         text = card.inner_text() or ""
-        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-        if not lines:
-            continue
-        rec = {"number": "", "type": "", "address": "", "date": "", "description": ""}
-        link = card.query_selector("a[href*='#/permit/']")
-        if link:
-            rec["number"] = (link.inner_text() or "").strip()
-        for i, ln in enumerate(lines):
-            low = ln.lower()
-            if low.startswith("type") and i + 1 <= len(lines):
-                rec["type"] = ln.split(":", 1)[-1].strip() or (lines[i + 1] if i + 1 < len(lines) else "")
-            elif low.startswith("address"):
-                rec["address"] = ln.split(":", 1)[-1].strip() or (lines[i + 1] if i + 1 < len(lines) else "")
-            elif "issued" in low and re.search(r"\d{1,2}/\d{1,2}/\d{4}", ln):
-                m = re.search(r"(\d{1,2}/\d{1,2}/\d{4})", ln)
-                rec["date"] = _normalize_date(m.group(1))
-            elif low.startswith("description"):
-                rec["description"] = ln.split(":", 1)[-1].strip()
-        if not rec["address"]:
-            # Heuristic: first line with digits + letters + VA/zip
-            for ln in lines:
-                if re.search(r"\d{1,6}\s+[A-Za-z]", ln) and ("VA" in ln.upper() or re.search(r"\b22\d{3}\b", ln)):
-                    rec["address"] = ln
+        rec = {"number": "", "type": "", "address": "", "date": "",
+               "status": "", "description": ""}
+        for ln in text.splitlines():
+            ln = ln.strip()
+            for label, key in CARD_FIELDS:
+                if ln.startswith(label + " "):
+                    val = ln[len(label):].strip()
+                    if key == "date":
+                        rec[key] = _normalize_date(val)
+                    elif not rec[key]:
+                        rec[key] = val
                     break
         if rec["number"] or rec["address"]:
             records.append(rec)
     return records
 
 
+# City names seen in these tenants' addresses ("STREET CITY VA ZIP", no commas)
+KNOWN_CITIES = [
+    "CHARLOTTESVILLE", "CROZET", "KESWICK", "EARLYSVILLE", "SCOTTSVILLE",
+    "NORTH GARDEN", "FREE UNION", "WHITE HALL", "AFTON", "BARBOURSVILLE",
+    "PALMYRA", "TROY", "FREDERICKSBURG",
+]
+
+
 def _parse_address(raw: str) -> dict:
-    m = re.match(r"^(.+?),?\s*([A-Za-z .]+?)?,?\s*VA[,\s]+(\d{5})", raw or "", re.IGNORECASE)
-    if m:
-        return {"street": m.group(1).strip(" ,"), "city": (m.group(2) or "").strip(" ,"),
-                "zip": m.group(3)}
-    zm = re.search(r"\b(\d{5})\b", raw or "")
-    return {"street": re.split(r",", raw or "")[0].strip(),
-            "city": "", "zip": zm.group(1) if zm else ""}
+    raw = (raw or "").strip()
+    m = re.match(r"^(.*?)\s+VA\s+(\d{5})(?:-\d{4})?$", raw, re.IGNORECASE)
+    if not m:
+        zm = re.search(r"\b(\d{5})\b", raw)
+        return {"street": re.split(r",", raw)[0].strip(),
+                "city": "", "zip": zm.group(1) if zm else ""}
+    head, zip_code = m.group(1).strip(" ,"), m.group(2)
+    street, city = head, ""
+    upper = head.upper()
+    for c in KNOWN_CITIES:
+        if upper.endswith(" " + c) or upper.endswith("," + c):
+            street = head[: len(head) - len(c)].strip(" ,")
+            city = c.title()
+            break
+    return {"street": street, "city": city, "zip": zip_code}
 
 
 def _normalize_date(val: str) -> str:
@@ -301,9 +319,21 @@ def _dump_dom(name: str, base: str):
 
 
 def _debug():
+    import config
     logging.basicConfig(level=logging.INFO)
-    for name, t in TENANTS.items():
-        _dump_dom(name, t["base"])
+    zips = {"Albemarle": config.ALBEMARLE_ZIPS, "Fredericksburg": config.FREDERICKSBURG_ZIPS}
+    for name in TENANTS:
+        print(f"\n{'='*70}\n=== production fetch: {name} (target ZIPs {sorted(zips[name])})\n{'='*70}")
+        try:
+            records = fetch_permits_for(name, zips[name], since_days=14)
+            print(f"{len(records)} records in target ZIPs; first 8:")
+            for r in records[:8]:
+                print(f"  {r['permit_number']} | {r['permit_type'][:38]:38} | "
+                      f"{r['property_address'][:28]:28} | {r['property_zip']} | {r['file_date']}")
+                print(f"    desc: {r['description'][:90]}")
+        except Exception as e:
+            print(f"  FAILED: {e}")
+            _dump_dom(name, TENANTS[name]["base"])
 
 
 if __name__ == "__main__":
