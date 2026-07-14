@@ -55,6 +55,7 @@ HEADERS = {
 CITY_ZIP_MAP = {
     "manakin sabot": "23103",
     "manakin-sabot": "23103",
+    "manakin": "23103",   # OCR often drops/garbles "Sabot"
     "oilville": "23129",
 }
 
@@ -159,7 +160,12 @@ def _parse_pdf(content: bytes) -> list[dict]:
 
     if not records and not full_text.strip():
         # Goochland reports are scanned images with no text layer — OCR them.
-        full_text = _ocr_pdf(content)
+        # The monthly PDF is a stack of scanned permit APPLICATION FORMS
+        # (handwritten), so parse label-anchored form fields per page.
+        pages = _ocr_pdf_pages(content)
+        if any(re.search(r"site\s*address", p, re.IGNORECASE) for p in pages):
+            return _parse_application_forms(pages)
+        full_text = "\n".join(pages)
 
     if not records and full_text:
         records = _parse_text_lines(full_text)
@@ -167,7 +173,7 @@ def _parse_pdf(content: bytes) -> list[dict]:
     return records
 
 
-def _ocr_pdf(content: bytes) -> str:
+def _ocr_pdf_pages(content: bytes) -> list[str]:
     """
     Render each page with pypdfium2 (a pdfplumber dependency) and OCR
     with tesseract. Requires the tesseract-ocr binary + pytesseract
@@ -178,24 +184,112 @@ def _ocr_pdf(content: bytes) -> str:
         import pytesseract
     except ImportError as e:
         log.error("Goochland: OCR unavailable (%s) — scanned PDF skipped", e)
-        return ""
+        return []
 
-    text_parts = []
+    pages = []
     try:
         pdf = pdfium.PdfDocument(io.BytesIO(content))
-        for i, page in enumerate(pdf):
+        for page in pdf:
             bitmap = page.render(scale=300 / 72)  # 300 DPI
             image = bitmap.to_pil()
-            # PSM 6: assume a uniform block of text — best for tabular reports
-            text_parts.append(pytesseract.image_to_string(image, config="--psm 6"))
+            # PSM 6: assume a uniform block of text
+            pages.append(pytesseract.image_to_string(image, config="--psm 6"))
         pdf.close()
     except Exception as e:
         log.error("Goochland: OCR failed: %s", e)
-        return ""
+        return pages
 
-    text = "\n".join(text_parts)
-    log.info("Goochland: OCR extracted %d chars from %d pages", len(text), len(text_parts))
-    return text
+    log.info("Goochland: OCR extracted %d pages (%d chars)",
+             len(pages), sum(len(p) for p in pages))
+    return pages
+
+
+def _ocr_pdf(content: bytes) -> str:
+    return "\n".join(_ocr_pdf_pages(content))
+
+
+def _parse_application_forms(pages: list[str]) -> list[dict]:
+    """
+    Parse OCR'd scanned permit application forms (one form per 1-2 pages).
+    Handwritten fields OCR poorly, so extract only the load-bearing ones:
+    site address (+ ZIP/city) and scope of work. Owner names are left
+    empty on purpose — garbled OCR names must not end up on postcards;
+    the postcard falls back to "Homeowner" and enrichment fills the rest.
+    """
+    records: list[dict] = []
+    seen: set[str] = set()
+
+    for page in pages:
+        if not re.search(r"site\s*address", page, re.IGNORECASE):
+            continue
+        lines = [ln.strip() for ln in page.splitlines()]
+
+        # Locate the Site Address label and scan the next few lines
+        addr = ""
+        zip_code = ""
+        for i, ln in enumerate(lines):
+            if not re.search(r"site\s*address", ln, re.IGNORECASE):
+                continue
+            for cand in lines[i + 1:i + 4]:
+                m = re.search(r"(\d{1,6}\s+[A-Za-z].*)", cand)
+                if m:
+                    addr = m.group(1).strip()
+                    zm = re.search(r"\b(2[23]\d{3})\b", cand)
+                    if zm:
+                        zip_code = zm.group(1)
+                    break
+            break
+        if not addr:
+            continue
+
+        # Trim trailing OCR junk after the ZIP (if present)
+        if zip_code:
+            addr = addr[:addr.find(zip_code) + 5]
+
+        # Scope of work — first substantive line after the label
+        scope = ""
+        for i, ln in enumerate(lines):
+            if re.search(r"scope\s*of\s*work", ln, re.IGNORECASE):
+                inline = re.sub(r".*scope\s*of\s*work\s*:?", "", ln, flags=re.IGNORECASE).strip()
+                if len(inline) > 8:
+                    scope = inline
+                    break
+                for cand in lines[i + 1:i + 4]:
+                    cleaned = re.sub(r"^[^A-Za-z]+", "", cand).strip()
+                    if len(cleaned) > 8:
+                        scope = cleaned
+                        break
+                break
+
+        page_lower = page.lower()
+        is_commercial = "commercial building permit" in page_lower
+        permit_type = "Commercial Building" if is_commercial else "Residential Building"
+
+        # The street portion (before city/state) is the dedup + insert key
+        street = re.split(r",", addr)[0].strip()
+        street, city = _split_city_from_street(street)
+        key = street.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        records.append({
+            "source": "Goochland",
+            "permit_number": "",
+            "permit_type": permit_type,
+            "property_address": street,
+            "property_city": city or "Goochland",
+            "property_state": "VA",
+            "property_zip": zip_code,
+            "description": scope or addr,  # keep full addr for city inference
+            "file_date": "",
+            "job_value_dollars": 0,
+            "owner_name": "",   # handwriting OCR too unreliable for mail
+            "contractor_name": "",
+        })
+
+    log.info("Goochland: parsed %d application forms", len(records))
+    return records
 
 
 def _parse_table_rows(table: list[list]) -> list[dict]:
@@ -306,6 +400,25 @@ def _make_record(permit_number, permit_type, address, description,
     }
 
 
+# Goochland County post-office city names, longest first so
+# "manakin sabot" wins over "manakin"
+GOOCHLAND_CITIES = [
+    "manakin sabot", "manakin-sabot", "gum spring", "sandy hook",
+    "kents store", "hadensville", "goochland", "oilville", "maidens",
+    "crozier", "columbia", "manakin",
+]
+
+
+def _split_city_from_street(street: str) -> tuple[str, str]:
+    """Strip a trailing Goochland city name off an OCR'd street line."""
+    lowered = street.lower()
+    for city in GOOCHLAND_CITIES:
+        idx = lowered.rfind(city)
+        if idx > 0 and idx + len(city) >= len(lowered) - 3:
+            return street[:idx].strip(" ,.-"), street[idx:idx + len(city)].title()
+    return street, ""
+
+
 def _is_residential(record: dict) -> bool:
     blob = f"{record.get('permit_type','')} {record.get('description','')}".lower()
     if "commercial" in blob:
@@ -318,7 +431,8 @@ def _assign_zip(record: dict) -> bool:
     z = record.get("property_zip", "")
     if z:
         return z in TARGET_ZIPS
-    blob = f"{record.get('property_address','')} {record.get('description','')}".lower()
+    blob = (f"{record.get('property_address','')} {record.get('property_city','')} "
+            f"{record.get('description','')}").lower()
     for city, city_zip in CITY_ZIP_MAP.items():
         if city in blob:
             record["property_zip"] = city_zip
