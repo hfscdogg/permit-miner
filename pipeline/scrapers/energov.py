@@ -87,22 +87,27 @@ def _scrape(base: str, date_from: str, date_to: str) -> list[dict] | None:
         page = browser.new_page()
         try:
             page.goto(f"{base}#/search", timeout=45000)
-            # The Angular SPA renders well after networkidle — wait for the
-            # actual controls (root cause of a "button not found" failure
-            # that the slower debug path never hit)
+            # Element existence != Angular bootstrapped: give the SPA time
+            # to bind handlers, or the module change never registers and
+            # #button-Advanced stays ng-hidden.
             page.wait_for_selector("#SearchModule", timeout=45000)
+            page.wait_for_timeout(3000)
 
-            module_select = page.query_selector("#SearchModule")
-            _select_option_by_label(page, module_select, "Permit")
+            # Playwright's select_option fires proper input/change events
+            page.select_option("#SearchModule", label="Permit")
+            page.wait_for_timeout(1000)
 
-            page.wait_for_selector("#button-Advanced", timeout=15000)
-            page.click("#button-Advanced")
+            try:
+                page.wait_for_selector("#button-Advanced:visible", timeout=8000)
+                page.click("#button-Advanced")
+            except Exception:
+                # ng-show hasn't flipped — Angular still honors programmatic clicks
+                page.eval_on_selector("#button-Advanced", "el => el.click()")
 
             page.wait_for_selector("#IssueDateFrom", timeout=15000)
             page.fill("#IssueDateFrom", date_from)
             page.fill("#IssueDateTo", date_to)
 
-            page.wait_for_selector("#button-Search", timeout=15000)
             page.click("#button-Search")
             page.wait_for_selector("div[id^='entityRecordDiv']", timeout=30000)
             page.wait_for_timeout(1500)
