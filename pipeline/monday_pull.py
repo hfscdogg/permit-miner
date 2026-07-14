@@ -24,7 +24,7 @@ import httpx
 import config
 import db
 from pipeline.mailer import send_email
-from pipeline.scrapers import virginia_state, chesterfield, goochland, powhatan, hanover
+from pipeline.scrapers import virginia_state, chesterfield, goochland, powhatan, hanover, spotsylvania
 from pipeline.scrapers.assessor import get_assessed_value
 
 logging.basicConfig(
@@ -541,6 +541,14 @@ def run():
         log.info("Hanover: %d permits", len(hv_permits))
     except Exception as e:
         log.error("Hanover scraper failed: %s", e)
+
+    # Spotsylvania — monthly PDF permit reports
+    try:
+        sp_permits = spotsylvania.fetch_permits(since_days=since_days)
+        all_raw.extend(sp_permits)
+        log.info("Spotsylvania: %d permits", len(sp_permits))
+    except Exception as e:
+        log.error("Spotsylvania scraper failed: %s", e)
 
     log.info("Total raw permits collected: %d", len(all_raw))
 

@@ -47,6 +47,9 @@ POWHATAN_ZIPS = {"23120", "23139", "23153"}
 # Hanover ZIPs
 HANOVER_ZIPS = {"23005", "23116"}
 
+# Spotsylvania ZIPs — monthly permit report PDFs
+SPOTSYLVANIA_ZIPS = {"22407", "22553"}
+
 # ── Owner type detection ──────────────────────────────────────────────────────
 # If any of these patterns appear in owner_name, skip — it's a company/LLC.
 COMPANY_PATTERNS = [
