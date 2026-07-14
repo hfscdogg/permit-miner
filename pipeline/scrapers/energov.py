@@ -87,46 +87,25 @@ def _scrape(base: str, date_from: str, date_to: str) -> list[dict] | None:
         page = browser.new_page()
         try:
             page.goto(f"{base}#/search", timeout=45000)
-            page.wait_for_load_state("networkidle", timeout=30000)
+            # The Angular SPA renders well after networkidle — wait for the
+            # actual controls (root cause of a "button not found" failure
+            # that the slower debug path never hit)
+            page.wait_for_selector("#SearchModule", timeout=45000)
 
-            # Module dropdown: pick Permit (CSS renders <select id="SearchModule">)
-            module_select = page.query_selector("#SearchModule") or \
-                            page.query_selector("select[name='SearchModule']")
-            if module_select:
-                _select_option_by_label(page, module_select, "Permit")
-                page.wait_for_timeout(1500)
+            module_select = page.query_selector("#SearchModule")
+            _select_option_by_label(page, module_select, "Permit")
 
-            # Advanced search reveal (link/button labeled Advanced)
-            adv = page.query_selector("a:has-text('Advanced')") or \
-                  page.query_selector("button:has-text('Advanced')")
-            if adv:
-                adv.click()
-                page.wait_for_timeout(1000)
+            page.wait_for_selector("#button-Advanced", timeout=15000)
+            page.click("#button-Advanced")
 
-            # Issued date range — CSS commonly uses IssuedOnFrom/IssuedOnTo
-            filled = False
-            for from_sel, to_sel in (
-                ("#IssuedOnFrom", "#IssuedOnTo"),
-                ("#IssueDateFrom", "#IssueDateTo"),
-                ("input[name='IssuedOnFrom']", "input[name='IssuedOnTo']"),
-            ):
-                if page.query_selector(from_sel) and page.query_selector(to_sel):
-                    page.fill(from_sel, date_from)
-                    page.fill(to_sel, date_to)
-                    filled = True
-                    break
-            if not filled:
-                log.warning("EnerGov: date-range inputs not found on %s", base)
+            page.wait_for_selector("#IssueDateFrom", timeout=15000)
+            page.fill("#IssueDateFrom", date_from)
+            page.fill("#IssueDateTo", date_to)
 
-            # Search button
-            btn = page.query_selector("#button-Search") or \
-                  page.query_selector("button:has-text('Search')")
-            if not btn:
-                log.error("EnerGov: search button not found on %s", base)
-                return None
-            btn.click()
-            page.wait_for_load_state("networkidle", timeout=30000)
-            page.wait_for_timeout(2000)
+            page.wait_for_selector("#button-Search", timeout=15000)
+            page.click("#button-Search")
+            page.wait_for_selector("div[id^='entityRecordDiv']", timeout=30000)
+            page.wait_for_timeout(1500)
 
             # Bump page size to 100 to minimize pagination
             size_sel = page.query_selector("#pageSizeList")
