@@ -167,24 +167,49 @@ def _parse_pdf(content: bytes) -> list[dict]:
 
 def _find_column_bounds(words: list[dict]) -> list[float] | None:
     """
-    Locate the header row (PERMIT NUMBER | PERMIT TYPE | APPLICANT NAME |
-    ADDRESS) and return the x-start of each of the 4 columns.
+    Derive the 4 data-column x-starts by clustering "segment starts" —
+    a word beginning a line, or one following a horizontal gap — across
+    the whole page. (Header label positions don't line up with the data:
+    e.g. house numbers start left of the ADDRESS header text, which
+    chopped them into the neighboring column.)
     """
-    # Group header candidates by line
     by_top: dict[int, list[dict]] = {}
     for w in words:
         by_top.setdefault(int(w["top"] // 3), []).append(w)
 
+    starts: list[float] = []
     for grp in by_top.values():
-        texts = [w["text"].upper() for w in grp]
-        if "APPLICANT" in texts and "ADDRESS" in texts and texts.count("PERMIT") >= 2:
-            grp_sorted = sorted(grp, key=lambda w: w["x0"])
-            permit_xs = [w["x0"] for w in grp_sorted if w["text"].upper() == "PERMIT"]
-            applicant_x = next(w["x0"] for w in grp_sorted if w["text"].upper() == "APPLICANT")
-            address_x = next(w["x0"] for w in grp_sorted if w["text"].upper() == "ADDRESS")
-            if len(permit_xs) >= 2:
-                return [permit_xs[0], permit_xs[1], applicant_x, address_x]
-    return None
+        line = sorted(grp, key=lambda w: w["x0"])
+        prev = None
+        for w in line:
+            if prev is None or (w["x0"] - prev["x1"]) > 15:
+                starts.append(w["x0"])
+            prev = w
+
+    if len(starts) < 8:
+        return None
+
+    # Cluster segment starts within 8px
+    starts.sort()
+    clusters: list[list[float]] = [[starts[0]]]
+    for x in starts[1:]:
+        if x - clusters[-1][-1] <= 8:
+            clusters[-1].append(x)
+        else:
+            clusters.append([x])
+
+    ranked = sorted(clusters, key=len, reverse=True)
+    # Greedily pick the 4 most common starts that are >= 40px apart
+    picked: list[float] = []
+    for c in ranked:
+        pos = min(c)
+        if all(abs(pos - p) >= 40 for p in picked):
+            picked.append(pos)
+        if len(picked) == 4:
+            break
+    if len(picked) < 4:
+        return None
+    return sorted(picked)
 
 
 def _group_lines(words: list[dict], col_bounds: list[float]) -> list[list[str]]:
@@ -345,6 +370,13 @@ def _debug():
     print(f"\n=== Downloading latest: {label} ===")
     r = httpx.get(url, headers=HEADERS, follow_redirects=True, timeout=60)
     print(f"HTTP {r.status_code}  bytes={len(r.content)}")
+
+    with pdfplumber.open(io.BytesIO(r.content)) as pdf:
+        for page in pdf.pages[:3]:
+            words = page.extract_words()
+            if words:
+                print(f"column bounds (page sample): {_find_column_bounds(words)}")
+                break
 
     records = _parse_pdf(r.content)
     print(f"\n=== Parsed {len(records)} permit blocks (first 6) ===")
