@@ -57,9 +57,10 @@
   var pid = params.get('pid');
   var sig = params.get('sig');
   var ptype = params.get('ptype');
+  var fname = params.get('fname');
 
   if (ptype) {
-    showPersonalized(PTYPE_TO_SEGMENT[ptype] || 'default');
+    showPersonalized(PTYPE_TO_SEGMENT[ptype] || 'default', fname);
   }
 
   if (pid && sig) {
@@ -71,14 +72,18 @@
     });
   }
 
-  function showPersonalized(segment) {
+  function showPersonalized(segment, name) {
     var content = CONTENT_BY_SEGMENT[segment] || CONTENT_BY_SEGMENT['default'];
 
     var headline = document.getElementById('purl-headline');
     var subheadline = document.getElementById('purl-subheadline');
     var bodyText = document.getElementById('purl-body');
 
-    if (headline) headline.textContent = content.headline;
+    if (headline) {
+      headline.textContent = name
+        ? name + ', ' + content.headline
+        : content.headline;
+    }
     if (subheadline) subheadline.textContent = content.subheadline;
     if (bodyText) bodyText.innerHTML = content.body;
 

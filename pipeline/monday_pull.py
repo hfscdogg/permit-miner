@@ -17,6 +17,7 @@ import json
 import logging
 import sys
 from datetime import date, timedelta
+from urllib.parse import quote
 
 import httpx
 
@@ -303,16 +304,23 @@ def build_purl_url(permit_id: str, permit: dict = None, is_drip: bool = False) -
     campaign = "luxury_permits_drip" if is_drip else "luxury_permits"
     sig = _sign_pid(permit_id)
     ptype = classify_permit_type(permit) if permit else "general"
-    return (
+    owner = (permit or {}).get("owner_name", "") or ""
+    fname = owner.split()[0].title() if owner else ""
+    url = (
         f"{config.PURL_BASE_URL}"
         f"?pid={permit_id}"
         f"&sig={sig}"
         f"&ptype={ptype}"
+    )
+    if fname:
+        url += f"&fname={quote(fname, safe='')}"
+    url += (
         f"&utm_source=permit_miner"
         f"&utm_medium=direct_mail"
         f"&utm_campaign={campaign}"
         f"&utm_content={permit_id}"
     )
+    return url
 
 
 # ── Drip check ────────────────────────────────────────────────────────────────
