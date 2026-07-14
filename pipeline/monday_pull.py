@@ -512,7 +512,7 @@ def run():
     except Exception as e:
         log.error("Chesterfield scraper failed: %s", e)
 
-    # Goochland — EnerGov portal
+    # Goochland — monthly Permits Issued PDFs (Archive Center)
     try:
         gl_permits = goochland.fetch_permits(since_days=since_days)
         all_raw.extend(gl_permits)

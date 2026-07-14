@@ -1,0 +1,27 @@
+name: Scraper Debug
+
+on:
+  workflow_dispatch:
+    inputs:
+      scraper:
+        description: 'Scraper module to debug (e.g. goochland)'
+        required: true
+        default: 'goochland'
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install httpx pdfplumber python-dotenv
+
+      - name: Run scraper debug
+        run: python -m pipeline.scrapers.${{ inputs.scraper }}
