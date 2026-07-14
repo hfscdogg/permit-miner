@@ -215,6 +215,21 @@ def _normalize_date(val: str) -> str:
 
 # ── Debug entrypoint ──────────────────────────────────────────────────────────
 
+def _dump_inputs(page, note: str):
+    print(f"--- <input>/<select> after {note} ---")
+    for inp in page.query_selector_all("input"):
+        iid = inp.get_attribute("id") or ""
+        if re.search(r"date|issue|appl|final|from|to", iid, re.IGNORECASE):
+            print(f"  input id={iid} name={inp.get_attribute('name')} "
+                  f"type={inp.get_attribute('type')} placeholder={inp.get_attribute('placeholder')}")
+    for sel in page.query_selector_all("select"):
+        sid = sel.get_attribute("id") or ""
+        if re.search(r"type|status|workclass", sid, re.IGNORECASE):
+            opts = [(o.get_attribute("value"), (o.inner_text() or "").strip())
+                    for o in sel.query_selector_all("option")]
+            print(f"  select id={sid} options={opts[:10]}")
+
+
 def _dump_dom(name: str, base: str):
     from playwright.sync_api import sync_playwright
     print(f"\n{'='*70}\n=== {name}: {base}#/search\n{'='*70}")
@@ -226,35 +241,65 @@ def _dump_dom(name: str, base: str):
             page.wait_for_load_state("networkidle", timeout=30000)
             page.wait_for_timeout(3000)
 
-            print("--- <select> elements ---")
-            for sel in page.query_selector_all("select"):
-                opts = [(o.get_attribute("value"), (o.inner_text() or "").strip())
-                        for o in sel.query_selector_all("option")]
-                print(f"  id={sel.get_attribute('id')} name={sel.get_attribute('name')} "
-                      f"options={opts[:8]}")
+            # Step 1: module = Permit
+            module_select = page.query_selector("#SearchModule")
+            if module_select:
+                _select_option_by_label(page, module_select, "Permit")
+                page.wait_for_timeout(1500)
+                print("module=Permit selected")
 
-            print("--- <input> elements ---")
-            for inp in page.query_selector_all("input"):
-                print(f"  id={inp.get_attribute('id')} name={inp.get_attribute('name')} "
-                      f"type={inp.get_attribute('type')} placeholder={inp.get_attribute('placeholder')}")
+            # Step 2: Advanced pane
+            adv = page.query_selector("#button-Advanced")
+            if adv:
+                adv.click()
+                page.wait_for_timeout(1500)
+                print("Advanced clicked")
+            _dump_inputs(page, "module=Permit + Advanced")
 
-            print("--- <button>/<a> candidates ---")
-            for b in page.query_selector_all("button, a"):
-                txt = (b.inner_text() or "").strip()
-                if txt and len(txt) < 30 and re.search(r"search|advanced|export", txt, re.IGNORECASE):
-                    print(f"  <{b.evaluate('e => e.tagName')}> id={b.get_attribute('id')} text={txt!r}")
+            # Step 3: fill issued-date range if fields discovered
+            date_from = (date.today() - timedelta(days=14)).strftime("%m/%d/%Y")
+            date_to = date.today().strftime("%m/%d/%Y")
+            filled = None
+            for from_sel, to_sel in (
+                ("#IssuedOnFrom", "#IssuedOnTo"),
+                ("#IssueDateFrom", "#IssueDateTo"),
+                ("#PermitCriteria_IssueDateFrom", "#PermitCriteria_IssueDateTo"),
+            ):
+                if page.query_selector(from_sel) and page.query_selector(to_sel):
+                    page.fill(from_sel, date_from)
+                    page.fill(to_sel, date_to)
+                    filled = (from_sel, to_sel)
+                    break
+            print(f"date fields filled: {filled}")
 
-            # Try a live search for the last 14 days and show what comes back
-            print("\n--- Live search attempt ---")
-            rows = _scrape(base,
-                           (date.today() - timedelta(days=14)).strftime("%m/%d/%Y"),
-                           date.today().strftime("%m/%d/%Y"))
-            if rows is None:
-                print("  scrape returned None")
+            # Step 4: search and dump result structure
+            btn = page.query_selector("#button-Search")
+            if btn:
+                btn.click()
+                page.wait_for_load_state("networkidle", timeout=30000)
+                page.wait_for_timeout(3000)
+                print("Search clicked")
+
+            links = page.query_selector_all("a[href*='permit']")
+            print(f"{len(links)} permit-ish links on page; first 5 hrefs:")
+            for a in links[:5]:
+                print(f"  {a.get_attribute('href')} :: {(a.inner_text() or '').strip()[:40]}")
+
+            # Dump the first result card's HTML for selector design
+            for probe in ("[name='label-SearchResultModel']", ".search-result",
+                          "div[id^='entityRecordDiv']", "app-search-result",
+                          "div:has(> a[href*='permit'])"):
+                cards = page.query_selector_all(probe)
+                if cards:
+                    print(f"result container matched: {probe} x{len(cards)}")
+                    html = cards[0].evaluate("e => e.outerHTML")
+                    print(html[:2500])
+                    break
             else:
-                print(f"  {len(rows)} raw results; first 5:")
-                for r in rows[:5]:
-                    print(f"    {r}")
+                body = page.inner_text("body") or ""
+                idx = body.lower().find("found")
+                print("no card selector matched; body snippet:")
+                print(body[max(0, idx-200):idx+1200])
         except Exception as e:
             print(f"  DOM dump failed: {e}")
         finally:
