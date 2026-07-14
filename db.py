@@ -2,6 +2,7 @@
 db.py — SQLite schema initialization and helper functions.
 All database access goes through this module.
 """
+import re
 import sqlite3
 import uuid
 from contextlib import contextmanager
@@ -153,6 +154,15 @@ def init_db():
 
 def new_id() -> str:
     return str(uuid.uuid4()).replace("-", "")[:16]
+
+
+def clean_address(address: str) -> str:
+    """
+    Strip the internal __drip<N> suffix that drip records carry to bypass
+    the per-address dedup. Use everywhere an address leaves the system
+    (Lob payloads, emails, registry).
+    """
+    return re.sub(r"__drip\d*$", "", address or "").strip()
 
 
 def now_iso() -> str:

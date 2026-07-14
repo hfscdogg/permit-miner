@@ -82,7 +82,7 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
         "back":  back_template,
         "to": {
             "name":          owner_name,
-            "address_line1": permit.get("property_address", "").split(",")[0].strip(),
+            "address_line1": db.clean_address(permit.get("property_address", "")).split(",")[0].strip(),
             "address_city":  permit.get("property_city", ""),
             "address_state": permit.get("property_state", "VA"),
             "address_zip":   permit.get("property_zip", ""),
@@ -149,7 +149,7 @@ def build_digest_email(sent_permits: list[dict], error_count: int) -> str:
         <tr style="border-bottom:1px solid #f0f0f0;">
           <td style="padding:10px 8px;">
             <strong>{p.get('owner_name') or 'Unknown'}</strong>{nc_badge}{touch_badge}<br>
-            <span style="font-size:11px;color:#666;">{p.get('property_address','')} · {p.get('property_zip','')}</span>
+            <span style="font-size:11px;color:#666;">{db.clean_address(p.get('property_address',''))} · {p.get('property_zip','')}</span>
           </td>
           <td style="padding:10px 8px;font-size:12px;">{p.get('permit_type') or 'N/A'}</td>
           <td style="padding:10px 8px;font-size:12px;">{dollars(p.get('assessed_value_cents'))}</td>
@@ -269,7 +269,7 @@ def build_registry_from_sent(sent_permits: list[dict]) -> dict:
         registry[r["id"]] = {
             "owner_name":        r["owner_name"] or "",
             "phone":             r["owner_phone"] or "",
-            "address":           f"{r['property_address'] or ''}, {r['property_city'] or ''} {r['property_zip'] or ''}".strip(", "),
+            "address":           f"{db.clean_address(r['property_address'])}, {r['property_city'] or ''} {r['property_zip'] or ''}".strip(", "),
             "permit_type":       r["permit_type"] or "",
             "is_new_construction": bool(r["is_new_construction"]),
         }

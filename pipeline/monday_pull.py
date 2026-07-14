@@ -412,7 +412,7 @@ def build_preview_email(new_permits: list[dict]) -> str:
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:10px 8px;">
             <strong>{p.get('owner_name') or 'Unknown Owner'}</strong>{nc_badge}<br>
-            <span style="font-size:12px;color:#555;">{p.get('property_address','')} {p.get('property_city','')} {p.get('property_zip','')}</span>
+            <span style="font-size:12px;color:#555;">{db.clean_address(p.get('property_address',''))} {p.get('property_city','')} {p.get('property_zip','')}</span>
           </td>
           <td style="padding:10px 8px;font-size:12px;color:#555;white-space:nowrap;">
             {p.get('permit_type') or 'N/A'}
