@@ -98,7 +98,7 @@ def send_lob_postcard(permit: dict, is_drip: bool = False) -> tuple[bool, str, s
         },
         "merge_variables": {
             "name":           first_name,
-            "qr_url":         f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={quote(permit.get('purl_url', ''), safe='')}",
+            "qr_url":         f"https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=0&data={quote(permit.get('purl_url', ''), safe='')}",
         },
     }
 
