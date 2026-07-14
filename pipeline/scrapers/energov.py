@@ -285,21 +285,15 @@ def _dump_dom(name: str, base: str):
             for a in links[:5]:
                 print(f"  {a.get_attribute('href')} :: {(a.inner_text() or '').strip()[:40]}")
 
-            # Dump the first result card's HTML for selector design
-            for probe in ("[name='label-SearchResultModel']", ".search-result",
-                          "div[id^='entityRecordDiv']", "app-search-result",
-                          "div:has(> a[href*='permit'])"):
-                cards = page.query_selector_all(probe)
-                if cards:
-                    print(f"result container matched: {probe} x{len(cards)}")
-                    html = cards[0].evaluate("e => e.outerHTML")
-                    print(html[:2500])
-                    break
-            else:
-                body = page.inner_text("body") or ""
-                idx = body.lower().find("found")
-                print("no card selector matched; body snippet:")
-                print(body[max(0, idx-200):idx+1200])
+            # Dump result cards' TEXT for field-extraction design
+            cards = page.query_selector_all("div[id^='entityRecordDiv']")
+            print(f"entityRecordDiv cards: {len(cards)}")
+            for card in cards[:3]:
+                print("--- card inner text ---")
+                text = card.inner_text() or ""
+                for ln in text.splitlines():
+                    if ln.strip():
+                        print(f"  | {ln.strip()}")
         except Exception as e:
             print(f"  DOM dump failed: {e}")
         finally:

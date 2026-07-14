@@ -37,6 +37,9 @@ BASE_URL = "https://www.spotsylvania.va.us"
 TARGET_ZIPS = config.SPOTSYLVANIA_ZIPS
 
 CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+# Virginia's state composite locator — far better VA coverage than Census
+VGIN_GEOCODER = ("https://gismaps.vita.virginia.gov/arcgis/rest/services/Geocoding/"
+                 "VGIN_Composite_Locator/GeocodeServer/findAddressCandidates")
 GEOCODE_CAP = 80  # per run — bounds latency; log when hit
 
 HEADERS = {
@@ -330,6 +333,46 @@ def _geocode_zip(street: str, verbose: bool = False) -> tuple[str, str]:
     """Return (zip, city) for a Spotsylvania County street address, or ('', '')."""
     if not re.match(r"^\d{1,6}\s+\S", street):
         return "", ""  # lot/subdivision references can't geocode
+    z, city = _vgin_lookup(street, verbose)
+    if z:
+        return z, city
+    return _census_lookup(street, verbose)
+
+
+def _vgin_lookup(street: str, verbose: bool = False) -> tuple[str, str]:
+    """Virginia state composite locator — resolves nearly all VA addresses."""
+    try:
+        r = httpx.get(VGIN_GEOCODER, params={
+            "SingleLine": f"{street}, SPOTSYLVANIA COUNTY, VA",
+            "outFields": "*",
+            "maxLocations": "1",
+            "f": "json",
+        }, headers=HEADERS, timeout=20)
+        if verbose:
+            print(f"    [vgin {street!r}] HTTP {r.status_code} :: {r.text[:250]}")
+        r.raise_for_status()
+        candidates = r.json().get("candidates", [])
+        if candidates:
+            cand = candidates[0]
+            addr = cand.get("address", "")
+            attrs = cand.get("attributes", {}) or {}
+            z = attrs.get("Postal") or ""
+            if not z:
+                zm = re.search(r"\b(\d{5})\b", addr)
+                z = zm.group(1) if zm else ""
+            city = attrs.get("City") or ""
+            if not city:
+                cm = re.search(r",\s*([A-Za-z ]+),\s*(?:VA|VIRGINIA)", addr)
+                city = cm.group(1).strip() if cm else ""
+            return z, city.title()
+    except Exception as e:
+        log.warning("Spotsylvania: VGIN geocode failed for %s: %s", street, e)
+        if verbose:
+            print(f"    [vgin {street!r}] EXCEPTION: {e}")
+    return "", ""
+
+
+def _census_lookup(street: str, verbose: bool = False) -> tuple[str, str]:
     for city in ("FREDERICKSBURG", "SPOTSYLVANIA"):
         try:
             r = httpx.get(CENSUS_GEOCODER, params={
@@ -338,7 +381,7 @@ def _geocode_zip(street: str, verbose: bool = False) -> tuple[str, str]:
                 "format": "json",
             }, headers=HEADERS, timeout=20)
             if verbose:
-                print(f"    [geocode {street!r} {city}] HTTP {r.status_code} :: {r.text[:220]}")
+                print(f"    [census {street!r} {city}] HTTP {r.status_code} :: {r.text[:200]}")
             r.raise_for_status()
             matches = r.json().get("result", {}).get("addressMatches", [])
             if matches:
@@ -348,9 +391,9 @@ def _geocode_zip(street: str, verbose: bool = False) -> tuple[str, str]:
                 return (zm.group(1) if zm else "",
                         cm.group(1).title().strip() if cm else "")
         except Exception as e:
-            log.warning("Spotsylvania: geocode failed for %s (%s): %s", street, city, e)
+            log.warning("Spotsylvania: Census geocode failed for %s (%s): %s", street, city, e)
             if verbose:
-                print(f"    [geocode {street!r} {city}] EXCEPTION: {e}")
+                print(f"    [census {street!r} {city}] EXCEPTION: {e}")
     return "", ""
 
 
