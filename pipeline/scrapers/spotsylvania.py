@@ -1,21 +1,25 @@
 """
 spotsylvania.py — Spotsylvania County permit scraper.
 
-Source: Monthly Permit Report PDFs published in the county's CivicPlus
-Archive Center:
-    https://www.spotsylvania.va.us/Archive.aspx?AMID=47
-    (linked from https://www.spotsylvania.va.us/763/Monthly-Permit-Reports)
+Source: Monthly "Permits Issued" PDFs in the county's CivicPlus Archive
+Center (AMID=47), linked from /763/Monthly-Permit-Reports.
 
-Report columns: PERMIT NUMBER | PERMIT TYPE | APPLICANT NAME | ADDRESS |
-ISSUED DATE | PERMIT SUBTYPE. Generated PDFs (not scans), so pdfplumber
-table/text extraction should work without OCR.
+Layout (confirmed via Scraper Debug run against the June 2026 report):
+each permit is a 4-line block across 4 columns —
 
-ZIPs: 22407, 22553 (Fredericksburg-area territory)
-Cadence: monthly.
+    col 1            col 2               col 3              col 4
+    PERMIT NUMBER    review track        APPLICANT NAME     ADDRESS
+    ISSUED DATE      PERMIT SUBTYPE      OWNER NAME         PARCEL NUMBER
+    APPLIED DATE     STATUS              CONTRACTOR NAME    SUBDIVISION
+    DESCRIPTION                                             LOT BLOCK & TRACT
 
-Debug (run from GitHub Actions via the Scraper Debug workflow —
-local egress may be blocked):
-    python -m pipeline.scrapers.spotsylvania
+Addresses carry NO ZIP code and the county spans many ZIPs, so ZIPs are
+resolved through the free US Census geocoder for records that pass a
+project-keyword pre-filter (bounds geocoding volume).
+
+ZIPs: 22407, 22553. Cadence: monthly.
+
+Debug: python -m pipeline.scrapers.spotsylvania  (via Scraper Debug workflow)
 """
 import io
 import logging
@@ -32,7 +36,9 @@ INDEX_URL = "https://www.spotsylvania.va.us/Archive.aspx?AMID=47"
 BASE_URL = "https://www.spotsylvania.va.us"
 TARGET_ZIPS = config.SPOTSYLVANIA_ZIPS
 
-# CivicPlus WAF blocks non-browser user agents
+CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+GEOCODE_CAP = 80  # per run — bounds latency; log when hit
+
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -42,17 +48,25 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
+DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
+PERMIT_NUM_RE = re.compile(r"^[A-Z]{2,4}\d{2}-\d{3,6}$")
+PAGE_NOISE = ("permits issued", "spotsylvania county", "date range", "printed:",
+              "permit number", "issued date", "applied date", "description", "details")
+
+# Pre-filter before geocoding: worth a lookup only if the scope suggests a
+# real project. Superset of QUALIFYING_TAGS plus new-dwelling phrasing.
+INTEREST_KEYWORDS = list(config.QUALIFYING_TAGS) + [
+    "dwelling", "single family", "sfd", "new construction", "garage",
+]
+
 
 def fetch_permits(since_days: int = 14) -> list[dict]:
-    """Fetch permits from the latest Spotsylvania monthly report PDFs."""
     items = _find_report_items()
     if not items:
         log.warning("Spotsylvania: no monthly permit reports found in Archive Center")
         return []
 
     records: list[dict] = []
-    # Latest two reports cover the month boundary on weekly runs;
-    # address-level dedup downstream makes re-reads safe.
     for url, label in items[:2]:
         log.info("Spotsylvania: downloading %s (%s)", url, label)
         try:
@@ -66,17 +80,35 @@ def fetch_permits(since_days: int = 14) -> list[dict]:
                         url, r.headers.get("content-type"))
             continue
         parsed = _parse_pdf(r.content)
-        log.info("Spotsylvania: extracted %d records from %s", len(parsed), label)
+        log.info("Spotsylvania: extracted %d permit blocks from %s", len(parsed), label)
         records.extend(parsed)
 
-    filtered = [r for r in records if _zip_in_targets(r)]
-    log.info("Spotsylvania: %d permits in target ZIPs (of %d total)",
-             len(filtered), len(records))
-    return filtered
+    interesting = [r for r in records if _passes_prefilter(r)]
+    log.info("Spotsylvania: %d of %d pass project pre-filter; geocoding for ZIPs...",
+             len(interesting), len(records))
 
+    kept = []
+    geocoded = 0
+    for rec in interesting:
+        if geocoded >= GEOCODE_CAP:
+            log.warning("Spotsylvania: geocode cap (%d) reached — %d records skipped",
+                        GEOCODE_CAP, len(interesting) - geocoded)
+            break
+        zip_code, city = _geocode_zip(rec["property_address"])
+        geocoded += 1
+        if zip_code in TARGET_ZIPS:
+            rec["property_zip"] = zip_code
+            if city:
+                rec["property_city"] = city
+            kept.append(rec)
+
+    log.info("Spotsylvania: %d permits in target ZIPs", len(kept))
+    return kept
+
+
+# ── Archive Center listing ────────────────────────────────────────────────────
 
 def _find_report_items() -> list[tuple[str, str]]:
-    """Return [(pdf_url, label)] for monthly permit reports, newest first."""
     try:
         r = httpx.get(INDEX_URL, headers=HEADERS, follow_redirects=True, timeout=30)
         r.raise_for_status()
@@ -103,7 +135,6 @@ def _extract_report_items(html: str) -> list[tuple[str, str]]:
             continue
         seen.add(adid)
         low = label.lower()
-        # Skip the running "Total Dwellings & Permits" count summary
         if "total" in low or "dwelling" in low:
             continue
         if "permit" in low or not label:
@@ -113,209 +144,224 @@ def _extract_report_items(html: str) -> list[tuple[str, str]]:
     return [(url, label or f"item {adid}") for adid, url, label in unique]
 
 
+# ── PDF block parser ──────────────────────────────────────────────────────────
+
 def _parse_pdf(content: bytes) -> list[dict]:
-    """Extract permit records — table extraction first, text-line fallback."""
     records: list[dict] = []
-    full_text = ""
+    col_bounds: list[float] | None = None
 
     with pdfplumber.open(io.BytesIO(content)) as pdf:
-        header: list[str] | None = None
         for page in pdf.pages:
-            table = page.extract_table()
-            if table:
-                # Continuation pages may repeat or omit the header row
-                if _looks_like_header(table[0]):
-                    header = [(c or "").strip().lower() for c in table[0]]
-                    rows = table[1:]
-                else:
-                    rows = table
-                if header:
-                    records.extend(_parse_table_rows(header, rows))
-            text = page.extract_text()
-            if text:
-                full_text += text + "\n"
-
-    if not records and full_text:
-        records = _parse_text_lines(full_text)
+            words = page.extract_words()
+            if not words:
+                continue
+            if col_bounds is None:
+                col_bounds = _find_column_bounds(words)
+            if col_bounds is None:
+                continue
+            lines = _group_lines(words, col_bounds)
+            records.extend(_parse_blocks(lines))
 
     return records
 
 
-def _looks_like_header(row: list) -> bool:
-    joined = " ".join((c or "") for c in row).lower()
-    return "permit" in joined and ("number" in joined or "type" in joined)
-
-
-def _parse_table_rows(header: list[str], rows: list[list]) -> list[dict]:
-    def col(*keywords, exclude=()) -> int | None:
-        for i, h in enumerate(header):
-            if any(k in h for k in keywords) and not any(x in h for x in exclude):
-                return i
-        return None
-
-    c_num     = col("number")
-    c_type    = col("permit type", "type", exclude=("subtype", "sub type"))
-    c_subtype = col("subtype", "sub type")
-    c_appl    = col("applicant", "name", exclude=("subtype",))
-    c_addr    = col("address", "location")
-    c_date    = col("issued", "date")
-
-    def cell(row: list, idx: int | None) -> str:
-        if idx is None or idx >= len(row):
-            return ""
-        return (row[idx] or "").replace("\n", " ").strip()
-
-    records = []
-    for row in rows:
-        if not any(row):
-            continue
-        address = cell(row, c_addr)
-        if not address or not re.search(r"\d", address):
-            continue
-        records.append(_make_record(
-            permit_number=cell(row, c_num),
-            permit_type=cell(row, c_type),
-            subtype=cell(row, c_subtype),
-            applicant=cell(row, c_appl),
-            address=address,
-            issued_date=cell(row, c_date),
-        ))
-    return records
-
-
-def _parse_text_lines(text: str) -> list[dict]:
+def _find_column_bounds(words: list[dict]) -> list[float] | None:
     """
-    Fallback: lines shaped like
-        B2400123 RESIDENTIAL SMITH JOHN 123 LAKE DR FREDERICKSBURG VA 22407 6/12/2026 POOL
-    Only requires a permit-number-ish token, an address, and a date.
+    Locate the header row (PERMIT NUMBER | PERMIT TYPE | APPLICANT NAME |
+    ADDRESS) and return the x-start of each of the 4 columns.
     """
+    # Group header candidates by line
+    by_top: dict[int, list[dict]] = {}
+    for w in words:
+        by_top.setdefault(int(w["top"] // 3), []).append(w)
+
+    for grp in by_top.values():
+        texts = [w["text"].upper() for w in grp]
+        if "APPLICANT" in texts and "ADDRESS" in texts and texts.count("PERMIT") >= 2:
+            grp_sorted = sorted(grp, key=lambda w: w["x0"])
+            permit_xs = [w["x0"] for w in grp_sorted if w["text"].upper() == "PERMIT"]
+            applicant_x = next(w["x0"] for w in grp_sorted if w["text"].upper() == "APPLICANT")
+            address_x = next(w["x0"] for w in grp_sorted if w["text"].upper() == "ADDRESS")
+            if len(permit_xs) >= 2:
+                return [permit_xs[0], permit_xs[1], applicant_x, address_x]
+    return None
+
+
+def _group_lines(words: list[dict], col_bounds: list[float]) -> list[list[str]]:
+    """Group words into visual lines, then bucket each line's words into 4 columns."""
+    by_top: dict[int, list[dict]] = {}
+    for w in words:
+        by_top.setdefault(int(w["top"] // 3), []).append(w)
+
+    lines = []
+    for key in sorted(by_top):
+        cols = ["", "", "", ""]
+        for w in sorted(by_top[key], key=lambda w: w["x0"]):
+            idx = 0
+            for i, bound in enumerate(col_bounds):
+                if w["x0"] >= bound - 4:
+                    idx = i
+            cols[idx] = (cols[idx] + " " + w["text"]).strip()
+        lines.append(cols)
+    return lines
+
+
+def _parse_blocks(lines: list[list[str]]) -> list[dict]:
     records = []
-    for raw in text.splitlines():
-        line = raw.strip()
-        if len(line) < 20:
+    block: dict | None = None
+
+    def flush():
+        nonlocal block
+        if block and block.get("address"):
+            records.append(_make_record(block))
+        block = None
+
+    for cols in lines:
+        c0, c1, c2, c3 = cols
+        low0 = c0.lower()
+        if any(low0.startswith(n) for n in PAGE_NOISE):
             continue
-        date_m = re.search(r"(\d{1,2}/\d{1,2}/\d{2,4})", line)
-        num_m = re.match(r"([A-Z]{0,4}\d{2,4}[-]?\d{3,6})\s+", line)
-        addr_m = re.search(r"\b(\d{1,6}\s+[A-Z][A-Za-z0-9 .'-]+?)(?=\s+\d{1,2}/|\s{2,}|$)", line)
-        if not (date_m and addr_m):
+
+        if PERMIT_NUM_RE.match(c0):
+            flush()
+            block = {"number": c0, "applicant": c2, "address": c3,
+                     "dates": [], "subtype": "", "status": "",
+                     "owner": "", "contractor": "", "desc": []}
             continue
-        records.append(_make_record(
-            permit_number=num_m.group(1) if num_m else "",
-            permit_type=line[num_m.end():addr_m.start()].strip() if num_m else "",
-            subtype="",
-            applicant="",
-            address=addr_m.group(1).strip(),
-            issued_date=date_m.group(1),
-        ))
+
+        if block is None:
+            continue
+
+        if DATE_RE.match(c0):
+            block["dates"].append(c0)
+            if len(block["dates"]) == 1:      # issued-date line
+                block["subtype"] = c1
+                block["owner"] = c2
+            else:                              # applied-date line
+                block["status"] = c1
+                block["contractor"] = c2
+            continue
+
+        # Continuation / description lines
+        if c2 and not c0 and not c1:
+            # wrapped contact name (e.g. "LLC" under the contractor)
+            if len(block["dates"]) >= 2:
+                block["contractor"] = f'{block["contractor"]} {c2}'.strip()
+            else:
+                block["owner"] = f'{block["owner"]} {c2}'.strip()
+            continue
+        if c0:
+            block["desc"].append(c0)
+
+    flush()
     return records
 
 
-def _make_record(permit_number, permit_type, subtype, applicant,
-                 address, issued_date) -> dict:
-    # Applicant may be the homeowner or a company — route companies to
-    # contractor_name so the owner-type filter doesn't drop the permit.
+def _make_record(block: dict) -> dict:
+    owner_raw = (block["owner"] or "").strip()
+    # County suffixes owner names with "OR" (co-owner notation) — drop it
+    owner_raw = re.sub(r"\s+OR$", "", owner_raw)
     owner_name = ""
-    contractor_name = ""
-    if applicant:
-        upper = f" {applicant.upper()} "
-        if any(pat in upper for pat in config.COMPANY_PATTERNS):
-            contractor_name = applicant.title()
-        else:
-            owner_name = applicant.title()
+    if owner_raw:
+        upper = f" {owner_raw.upper()} "
+        if not any(pat in upper for pat in config.COMPANY_PATTERNS):
+            owner_name = owner_raw.title()
 
-    description = f"{permit_type} {subtype}".strip()
+    subtype = block["subtype"] or ""
+    description = " ".join([subtype] + block["desc"]).strip()
+
     return {
         "source": "Spotsylvania",
-        "permit_number": permit_number,
-        "permit_type": permit_type or "Residential Building",
-        "property_address": _street_only(address),
+        "permit_number": block["number"],
+        "permit_type": subtype.title() or "Residential Building",
+        "property_address": block["address"].strip(),
         "property_city": "Fredericksburg",
         "property_state": "VA",
-        "property_zip": _extract_zip(address),
+        "property_zip": "",
         "description": description,
-        "file_date": _normalize_date(issued_date),
+        "file_date": _normalize_date(block["dates"][0] if block["dates"] else ""),
         "job_value_dollars": 0,
         "owner_name": owner_name,
-        "contractor_name": contractor_name,
+        "contractor_name": (block["contractor"] or "").title(),
+        "_status": block["status"],
     }
 
 
-def _street_only(address: str) -> str:
-    """Trim city/state/ZIP tail if present; keep the street line."""
-    addr = re.split(r",", address)[0].strip()
-    addr = re.sub(r"\s+(FREDERICKSBURG|SPOTSYLVANIA|PARTLOW|THORNBURG)\b.*$", "",
-                  addr, flags=re.IGNORECASE).strip()
-    return addr
+def _passes_prefilter(record: dict) -> bool:
+    if not record["permit_number"].upper().startswith("RES"):
+        return False
+    status = (record.get("_status") or "").upper()
+    if status and "ISSUED" not in status:
+        return False
+    text = f'{record["permit_type"]} {record["description"]}'.lower()
+    if any(kw in text for kw in config.MAINTENANCE_KEYWORDS):
+        return False
+    return any(kw in text for kw in INTEREST_KEYWORDS)
 
 
-def _extract_zip(text: str) -> str:
-    m = re.search(r"\b(22\d{3})\b", text)
-    return m.group(1) if m else ""
+# ── ZIP resolution via US Census geocoder ─────────────────────────────────────
 
-
-def _zip_in_targets(record: dict) -> bool:
-    return record.get("property_zip", "") in TARGET_ZIPS
+def _geocode_zip(street: str) -> tuple[str, str]:
+    """Return (zip, city) for a Spotsylvania County street address, or ('', '')."""
+    for city in ("FREDERICKSBURG", "SPOTSYLVANIA"):
+        try:
+            r = httpx.get(CENSUS_GEOCODER, params={
+                "address": f"{street}, {city}, VA",
+                "benchmark": "Public_AR_Current",
+                "format": "json",
+            }, timeout=15)
+            r.raise_for_status()
+            matches = r.json().get("result", {}).get("addressMatches", [])
+            if matches:
+                matched = matches[0].get("matchedAddress", "")
+                zm = re.search(r"\b(\d{5})\b", matched)
+                cm = re.search(r",\s*([A-Z ]+),\s*VA", matched)
+                return (zm.group(1) if zm else "",
+                        cm.group(1).title().strip() if cm else "")
+        except Exception as e:
+            log.debug("Spotsylvania: geocode failed for %s (%s): %s", street, city, e)
+    return "", ""
 
 
 def _normalize_date(val: str) -> str:
-    if not val:
-        return ""
-    m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{2,4})", val)
+    m = re.match(r"(\d{1,2})/(\d{1,2})/(\d{4})", val or "")
     if m:
-        year = m.group(3)
-        if len(year) == 2:
-            year = f"20{year}"
-        return f"{year}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
-    return val
+        return f"{m.group(3)}-{int(m.group(1)):02d}-{int(m.group(2)):02d}"
+    return val or ""
 
 
 # ── Debug entrypoint ──────────────────────────────────────────────────────────
 
 def _debug():
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s — %(message)s")
-    print("=== Archive Center items ===")
-    r = httpx.get(INDEX_URL, headers=HEADERS, follow_redirects=True, timeout=30)
-    print(f"listing HTTP {r.status_code}, {len(r.text)} chars")
-    items = _extract_report_items(r.text)
-    for url, label in items[:12]:
+    items = _find_report_items()
+    print(f"=== {len(items)} Archive Center items ===")
+    for url, label in items[:5]:
         print(f"  {label}  ->  {url}")
     if not items:
-        print("  (none found) — dumping anchors for diagnosis:")
-        anchors = re.findall(r"<a[^>]+href[^>]*>.*?</a>", r.text, re.IGNORECASE | re.DOTALL)
-        for a in anchors:
-            flat = " ".join(a.split())
-            if re.search(r"archive|viewfile|adid|permit|report", flat, re.IGNORECASE):
-                print(f"  ANCHOR: {flat[:250]}")
         return
 
     url, label = items[0]
     print(f"\n=== Downloading latest: {label} ===")
     r = httpx.get(url, headers=HEADERS, follow_redirects=True, timeout=60)
-    print(f"HTTP {r.status_code}  content-type={r.headers.get('content-type')}  bytes={len(r.content)}")
-    if not r.content[:5].startswith(b"%PDF"):
-        print("Not a PDF — first 500 bytes:")
-        print(r.content[:500])
-        return
-
-    with pdfplumber.open(io.BytesIO(r.content)) as pdf:
-        print(f"\n=== PDF has {len(pdf.pages)} pages ===")
-        for i, page in enumerate(pdf.pages[:2]):
-            print(f"\n--- Page {i+1} raw text (first 3000 chars) ---")
-            print((page.extract_text() or "(no text extracted)")[:3000])
-            table = page.extract_table()
-            if table:
-                print(f"\n--- Page {i+1} table ({len(table)} rows, first 10) ---")
-                for row in table[:10]:
-                    print(f"  {row}")
+    print(f"HTTP {r.status_code}  bytes={len(r.content)}")
 
     records = _parse_pdf(r.content)
-    print(f"\n=== Parsed {len(records)} records (first 10) ===")
-    for rec in records[:10]:
+    print(f"\n=== Parsed {len(records)} permit blocks (first 6) ===")
+    for rec in records[:6]:
         print(f"  {rec}")
-    kept = [rec for rec in records if _zip_in_targets(rec)]
-    print(f"\n=== {len(kept)} in target ZIPs (first 10) ===")
-    for rec in kept[:10]:
-        print(f"  {rec}")
+
+    interesting = [rec for rec in records if _passes_prefilter(rec)]
+    print(f"\n=== {len(interesting)} pass project pre-filter (first 10) ===")
+    for rec in interesting[:10]:
+        print(f'  {rec["permit_number"]} | {rec["property_address"][:30]:30} | '
+              f'{rec["description"][:60]}')
+
+    print("\n=== Geocoding first 5 interesting records ===")
+    for rec in interesting[:5]:
+        z, city = _geocode_zip(rec["property_address"])
+        mark = "TARGET" if z in TARGET_ZIPS else ""
+        print(f'  {rec["property_address"][:35]:35} -> zip={z or "?"} city={city or "?"} {mark}')
 
 
 if __name__ == "__main__":
