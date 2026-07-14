@@ -285,7 +285,7 @@ def _parse_blocks(lines: list[list[str]]) -> list[dict]:
 def _make_record(block: dict) -> dict:
     owner_raw = (block["owner"] or "").strip()
     # County suffixes owner names with "OR" (co-owner notation) — drop it
-    owner_raw = re.sub(r"\s+OR$", "", owner_raw)
+    owner_raw = re.sub(r"\s+OR\b\s*$", "", owner_raw, flags=re.IGNORECASE)
     owner_name = ""
     if owner_raw:
         upper = f" {owner_raw.upper()} "
@@ -326,15 +326,19 @@ def _passes_prefilter(record: dict) -> bool:
 
 # ── ZIP resolution via US Census geocoder ─────────────────────────────────────
 
-def _geocode_zip(street: str) -> tuple[str, str]:
+def _geocode_zip(street: str, verbose: bool = False) -> tuple[str, str]:
     """Return (zip, city) for a Spotsylvania County street address, or ('', '')."""
+    if not re.match(r"^\d{1,6}\s+\S", street):
+        return "", ""  # lot/subdivision references can't geocode
     for city in ("FREDERICKSBURG", "SPOTSYLVANIA"):
         try:
             r = httpx.get(CENSUS_GEOCODER, params={
                 "address": f"{street}, {city}, VA",
                 "benchmark": "Public_AR_Current",
                 "format": "json",
-            }, timeout=15)
+            }, headers=HEADERS, timeout=20)
+            if verbose:
+                print(f"    [geocode {street!r} {city}] HTTP {r.status_code} :: {r.text[:220]}")
             r.raise_for_status()
             matches = r.json().get("result", {}).get("addressMatches", [])
             if matches:
@@ -344,7 +348,9 @@ def _geocode_zip(street: str) -> tuple[str, str]:
                 return (zm.group(1) if zm else "",
                         cm.group(1).title().strip() if cm else "")
         except Exception as e:
-            log.debug("Spotsylvania: geocode failed for %s (%s): %s", street, city, e)
+            log.warning("Spotsylvania: geocode failed for %s (%s): %s", street, city, e)
+            if verbose:
+                print(f"    [geocode {street!r} {city}] EXCEPTION: {e}")
     return "", ""
 
 
@@ -389,9 +395,9 @@ def _debug():
         print(f'  {rec["permit_number"]} | {rec["property_address"][:30]:30} | '
               f'{rec["description"][:60]}')
 
-    print("\n=== Geocoding first 5 interesting records ===")
+    print("\n=== Geocoding first 5 interesting records (verbose) ===")
     for rec in interesting[:5]:
-        z, city = _geocode_zip(rec["property_address"])
+        z, city = _geocode_zip(rec["property_address"], verbose=True)
         mark = "TARGET" if z in TARGET_ZIPS else ""
         print(f'  {rec["property_address"][:35]:35} -> zip={z or "?"} city={city or "?"} {mark}')
 
