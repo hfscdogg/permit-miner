@@ -63,16 +63,30 @@ COMPANY_PATTERNS = [
 MIN_JOB_VALUE_DOLLARS = 75_000
 
 # Minimum assessed property value in dollars to qualify.
-MIN_ASSESSED_VALUE_DOLLARS = 500_000
+MIN_ASSESSED_VALUE_DOLLARS = 750_000
 
-# Tags / permit type keywords that qualify a permit.
+# Project keywords that qualify a permit. Deliberately excludes generic
+# tokens like "residential"/"single family" — county permit types (e.g.
+# Chesterfield's blanket "Residential Building") would auto-pass every
+# record and let maintenance jobs through.
 QUALIFYING_TAGS = [
     "new_construction", "new construction", "addition", "renovation", "remodel",
-    "pool", "deck", "patio", "outdoor kitchen",
-    "kitchen", "bathroom", "master suite", "master bedroom",
-    "hvac", "electrical", "plumbing", "solar",
-    "adu", "accessory dwelling", "detached garage",
-    "single family", "residential",
+    "pool", "deck", "patio", "porch", "screened", "sunroom",
+    "outdoor kitchen", "outdoor living",
+    "kitchen", "bathroom", "bath", "master suite", "master bedroom",
+    "basement", "rec room", "media room", "theater", "wine cellar", "elevator",
+    "adu", "accessory dwelling", "detached garage", "pool house", "guest house",
+]
+
+# Maintenance/repair scopes that disqualify a permit even when a project
+# keyword also matches (e.g. "replace all deck boards"). New construction
+# is checked before this and always passes.
+MAINTENANCE_KEYWORDS = [
+    "crawl space", "crawlspace", "encapsulat", "repair", "replace",
+    "re-roof", "reroof", "roofing", "shingle", "siding",
+    "water heater", "foundation", "jack", "waterproof", "insulation",
+    "mold", "remediation", "abatement", "carport", "above ground",
+    "above-ground", "storage shed", "demolition", "tear off", "gutter",
 ]
 
 NEW_CONSTRUCTION_KEYWORDS = [

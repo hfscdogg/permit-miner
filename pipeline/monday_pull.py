@@ -61,11 +61,17 @@ def is_new_construction(permit: dict) -> bool:
 
 
 def passes_tag_filter(permit: dict) -> bool:
-    """Returns True if permit type/description contains at least one qualifying keyword."""
+    """
+    Returns True if the permit describes a qualifying project.
+    Maintenance/repair scopes are rejected even when a project keyword
+    also matches (e.g. "replace all deck boards").
+    """
     text = (
         (permit.get("permit_type") or "") + " " +
         (permit.get("description") or "")
     ).lower()
+    if any(kw in text for kw in config.MAINTENANCE_KEYWORDS):
+        return False
     return any(tag in text for tag in config.QUALIFYING_TAGS)
 
 
