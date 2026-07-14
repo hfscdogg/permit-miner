@@ -111,22 +111,20 @@ def _find_report_items() -> list[tuple[str, str]]:
         log.error("Goochland: could not fetch Archive Center listing: %s", e)
         return []
 
+    return _extract_report_items(r.text)
+
+
+def _extract_report_items(html: str) -> list[tuple[str, str]]:
     items: list[tuple[int, str, str]] = []
 
-    # Pattern A: Archive.aspx?ADID=nnn links with label text
+    # Match ADID= or ViewFile/Item/ links in any quoting style, tolerating
+    # &amp;-encoded query strings and nested tags inside the anchor text.
     for m in re.finditer(
-        r'href="[^"]*Archive\.aspx\?ADID=(\d+)[^"]*"[^>]*>([^<]*)</a>',
-        r.text, re.IGNORECASE,
+        r"""<a[^>]+href\s*=\s*["']([^"']*(?:ADID=|ViewFile/Item/)(\d+)[^"']*)["'][^>]*>(.*?)</a>""",
+        html, re.IGNORECASE | re.DOTALL,
     ):
-        adid, label = int(m.group(1)), m.group(2).strip()
-        items.append((adid, f"{BASE_URL}/ArchiveCenter/ViewFile/Item/{adid}", label))
-
-    # Pattern B: direct ArchiveCenter/ViewFile/Item/nnn links
-    for m in re.finditer(
-        r'href="[^"]*/ArchiveCenter/ViewFile/Item/(\d+)[^"]*"[^>]*>([^<]*)</a>',
-        r.text, re.IGNORECASE,
-    ):
-        adid, label = int(m.group(1)), m.group(2).strip()
+        adid = int(m.group(2))
+        label = re.sub(r"<[^>]+>", "", m.group(3)).strip()
         items.append((adid, f"{BASE_URL}/ArchiveCenter/ViewFile/Item/{adid}", label))
 
     # Keep permit reports only (defensive: AMID=60 should be all permits,
@@ -317,11 +315,22 @@ def _debug():
     """Dump the archive listing, raw text of the latest PDF, and parsed records."""
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s — %(message)s")
     print("=== Archive Center items ===")
-    items = _find_report_items()
+    r = httpx.get(INDEX_URL, headers=HEADERS, follow_redirects=True, timeout=30)
+    print(f"listing HTTP {r.status_code}, {len(r.text)} chars")
+    items = _extract_report_items(r.text)
     for url, label in items[:12]:
         print(f"  {label}  ->  {url}")
     if not items:
-        print("  (none found)")
+        print("  (none found) — dumping anchors for diagnosis:")
+        anchors = re.findall(r"<a[^>]+href[^>]*>.*?</a>", r.text, re.IGNORECASE | re.DOTALL)
+        for a in anchors:
+            flat = " ".join(a.split())
+            if re.search(r"archive|viewfile|adid|permit|report", flat, re.IGNORECASE):
+                print(f"  ANCHOR: {flat[:250]}")
+        # Also show any occurrences of 'permit' with context
+        for m in list(re.finditer(r"permit", r.text, re.IGNORECASE))[:10]:
+            s = max(0, m.start() - 120)
+            print(f"  CONTEXT: {' '.join(r.text[s:m.end()+120].split())}")
         return
 
     url, label = items[0]
