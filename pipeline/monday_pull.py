@@ -25,7 +25,8 @@ import config
 import db
 from pipeline.mailer import send_email
 from pipeline.scrapers import (virginia_state, chesterfield, goochland, powhatan,
-                               hanover, spotsylvania, albemarle, fredericksburg)
+                               hanover, spotsylvania, albemarle, fredericksburg,
+                               james_city)
 from pipeline.scrapers.assessor import get_assessed_value
 
 logging.basicConfig(
@@ -566,6 +567,14 @@ def run():
         log.info("Fredericksburg: %d permits", len(fb_permits))
     except Exception as e:
         log.error("Fredericksburg scraper failed: %s", e)
+
+    # James City County — EnerGov portal (Williamsburg area)
+    try:
+        jc_permits = james_city.fetch_permits(since_days=since_days)
+        all_raw.extend(jc_permits)
+        log.info("James City: %d permits", len(jc_permits))
+    except Exception as e:
+        log.error("James City scraper failed: %s", e)
 
     log.info("Total raw permits collected: %d", len(all_raw))
 

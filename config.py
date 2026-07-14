@@ -58,6 +58,9 @@ ALBEMARLE_ZIPS = {"22901", "22911", "22947"}
 # postal addresses — not reachable via the city portal.
 FREDERICKSBURG_ZIPS = {"22401"}
 
+# James City County ZIPs — EnerGov portal ("PermitLink"), Williamsburg area
+JAMES_CITY_ZIPS = {"23168", "23188"}
+
 # ── Owner type detection ──────────────────────────────────────────────────────
 # If any of these patterns appear in owner_name, skip — it's a company/LLC.
 COMPANY_PATTERNS = [

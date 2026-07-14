@@ -29,6 +29,10 @@ TENANTS = {
         "base": "https://selfservice.fredericksburgva.gov/energov_prod/selfservice",
         "default_city": "Fredericksburg",
     },
+    "James City": {
+        "base": "https://jamescitycountyva-energovweb.tylerhost.net/apps/selfservice",
+        "default_city": "Williamsburg",
+    },
 }
 
 MAX_PAGES = 15
@@ -187,6 +191,7 @@ KNOWN_CITIES = [
     "CHARLOTTESVILLE", "CROZET", "KESWICK", "EARLYSVILLE", "SCOTTSVILLE",
     "NORTH GARDEN", "FREE UNION", "WHITE HALL", "AFTON", "BARBOURSVILLE",
     "PALMYRA", "TROY", "FREDERICKSBURG",
+    "WILLIAMSBURG", "TOANO", "NORGE", "LANEXA",
 ]
 
 
@@ -305,7 +310,8 @@ def _dump_dom(name: str, base: str):
 def _debug():
     import config
     logging.basicConfig(level=logging.INFO)
-    zips = {"Albemarle": config.ALBEMARLE_ZIPS, "Fredericksburg": config.FREDERICKSBURG_ZIPS}
+    zips = {"Albemarle": config.ALBEMARLE_ZIPS, "Fredericksburg": config.FREDERICKSBURG_ZIPS,
+            "James City": config.JAMES_CITY_ZIPS}
     for name in TENANTS:
         print(f"\n{'='*70}\n=== production fetch: {name} (target ZIPs {sorted(zips[name])})\n{'='*70}")
         try:
