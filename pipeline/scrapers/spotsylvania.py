@@ -40,8 +40,7 @@ CENSUS_GEOCODER = "https://geocoding.geo.census.gov/geocoder/locations/onelinead
 # Virginia's state composite locator (VGIN, hosted by VDEM) — candidate
 # endpoints tried in order; hostnames have moved over the years
 VGIN_GEOCODERS = [
-    "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/Geocoding/"
-    "VA_Composite_Locator/GeocodeServer/findAddressCandidates",
+    # Confirmed working 2026-07-14 (score-100 AddressPoint matches)
     "https://vginmaps.vdem.virginia.gov/arcgis/rest/services/Geocoding/"
     "VGIN_Composite_Locator/GeocodeServer/findAddressCandidates",
 ]
