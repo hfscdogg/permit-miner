@@ -26,7 +26,7 @@ import db
 from pipeline.mailer import send_email
 from pipeline.scrapers import (virginia_state, chesterfield, goochland, powhatan,
                                hanover, spotsylvania, albemarle, fredericksburg,
-                               james_city)
+                               james_city, henrico)
 from pipeline.scrapers.assessor import get_assessed_value
 
 logging.basicConfig(
@@ -511,6 +511,14 @@ def run():
         log.info("Virginia state CSV: %d permits", len(va_permits))
     except Exception as e:
         log.error("Virginia state CSV failed: %s", e)
+
+    # Henrico — monthly Excel workbooks from henrico.gov
+    try:
+        hc_permits = henrico.fetch_permits(since_days=since_days)
+        all_raw.extend(hc_permits)
+        log.info("Henrico: %d permits", len(hc_permits))
+    except Exception as e:
+        log.error("Henrico scraper failed: %s", e)
 
     # Chesterfield — Accela portal (may have better data than state CSV)
     try:
