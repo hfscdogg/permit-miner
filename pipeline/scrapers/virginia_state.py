@@ -8,7 +8,7 @@ RESEARCH FINDINGS (March 2026):
 - permits.virginia.gov is the Virginia Permit Transparency portal but covers
   only STATE AGENCY permits (VDOT, DCR, DEQ, etc.) — not local building permits.
 - Richmond metro county permit data must come from county portals:
-    Henrico    → henrico.us Excel download    (pipeline/henrico_import.py)
+    Henrico    → henrico.us Excel download    (pipeline/scrapers/henrico.py)
     Chesterfield → Accela ACA portal          (pipeline/scrapers/chesterfield.py)
     Goochland  → EnerGov portal               (pipeline/scrapers/goochland.py)
     Powhatan   → TBD (stub)                   (pipeline/scrapers/powhatan.py)

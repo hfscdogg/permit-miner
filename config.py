@@ -119,13 +119,9 @@ DRIP_MAX_TOUCHES = 2
 LOB_BASE_URL = "https://api.lob.com/v1"
 POSTCARD_SIZE = "6x11"
 
-# ── Henrico Import ────────────────────────────────────────────────────────────
+# ── Henrico scraper ───────────────────────────────────────────────────────────
+# Monthly Excel workbooks; rows flow through monday_pull's shared filters.
 HENRICO_EXCEL_URL = "https://www.henrico.us/files/pdf/building/{MON}{YEAR}_BuildingPermit.xlsx"
-
-HENRICO_KEYWORDS = [
-    "single family", "new home", "new house", "addition", "renovation",
-    "remodel", "pool", "deck", "accessory dwelling",
-]
 
 # ── Virginia State CSV ────────────────────────────────────────────────────────
 # data.virginia.gov building permit dataset (may cover all counties)

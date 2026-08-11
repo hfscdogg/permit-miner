@@ -152,11 +152,11 @@ permit-miner/
   pipeline/
     monday_pull.py        # County scrapers + Apollo + preview email
     tuesday_send.py       # Lob send + WordPress registry push + digest email
-    henrico_import.py     # Monthly Henrico County Excel import
     monthly_report.py     # Monthly learning report
     mailer.py             # Shared SMTP email sender
     scrapers/
       virginia_state.py   # data.virginia.gov CSV (primary fallback)
+      henrico.py          # Monthly Excel workbook scraper (henrico.gov)
       chesterfield.py     # Accela ACA portal scraper
       goochland.py        # EnerGov portal scraper
       powhatan.py         # Stub (VA state CSV fallback)
@@ -173,7 +173,6 @@ permit-miner/
   .github/workflows/
     monday_pull.yml       # Cron: 0 13 * * 1
     tuesday_send.yml      # Cron: 0 13 * * 2
-    henrico_import.yml    # Cron: 0 13 5 * *
     monthly_report.yml    # Cron: 0 14 1 * *
   SETUP_GUIDE.md          # This file
   TEST_PROTOCOL.md        # 18-step validation checklist
@@ -184,10 +183,9 @@ permit-miner/
 ## Scheduling (automatic once repo is on GitHub)
 
 ```
-Monday    8:00 AM ET   Monday Pull workflow
+Monday    8:00 AM ET   Monday Pull workflow  (includes Henrico Excel scrape)
 Tuesday   8:00 AM ET   Tuesday Send workflow
-5th/month 8:00 AM ET   Henrico Import workflow
 1st/month 9:00 AM ET   Monthly Report workflow
 ```
 
-All four workflows can also be triggered manually via Actions → Run workflow.
+All three workflows can also be triggered manually via Actions → Run workflow.

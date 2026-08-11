@@ -49,10 +49,10 @@ Estimated: 4–5 days to live (code is already written — this is setup + valid
 - [ ] Confirm digest email with sent permits
 - [ ] Wait for postcard to arrive (3–5 business days) — scan QR code, confirm scan alert fires and PURL page loads with correct content variant
 
-## Day 6 (optional) — Henrico Import
+## Day 6 (optional) — Henrico Scraper
 
-- [ ] Run `python -m pipeline.henrico_import`
-- [ ] Confirm Henrico permits (ZIPs 23229/23233/23238) inserted with `source='Henrico Direct'`
+- [ ] Run `python -m pipeline.scrapers.henrico` to preview parsed rows
+- [ ] Run `python -m pipeline.monday_pull` — confirm Henrico permits (ZIPs 23229/23233/23238) inserted with `source='Henrico Direct'` and shown in the preview email
 - [ ] These flow into Tuesday send automatically
 
 ## Day 7 (optional) — Monthly Report
@@ -67,7 +67,6 @@ Estimated: 4–5 days to live (code is already written — this is setup + valid
 ```
 Monday    8:00 AM ET   python -m pipeline.monday_pull
 Tuesday   8:00 AM ET   python -m pipeline.tuesday_send
-5th/month 8:00 AM ET   python -m pipeline.henrico_import
 1st/month 9:00 AM ET   python -m pipeline.monthly_report
 ```
 
