@@ -253,6 +253,63 @@ def _clear_exclusions():
     log.info("Exclusions processed — duplicates will be skipped on next run.")
 
 
+def requalify_queued():
+    """
+    Re-run the current monday_pull filter chain over first-touch Queued
+    permits before mailing. Filter rules can tighten between the Monday
+    pull and the Tuesday send; records that no longer qualify are marked
+    Excluded here instead of mailed. Drip records (touch 2+) are skipped —
+    their first touch already went out.
+    """
+    from pipeline import monday_pull as mp
+
+    queued = [dict(p) for p in db.get_queued_permits(CUSTOMER_ID)]
+    first_touch = [p for p in queued if (p.get("touch_number") or 1) == 1]
+    if not first_touch:
+        return
+
+    recs = [{
+        "id":                     p["id"],
+        "property_address":       p.get("property_address") or "",
+        "permit_type":            p.get("permit_type") or "",
+        "description":            p.get("permit_tags") or "",
+        "owner_name":             p.get("owner_name") or "",
+        "job_value_dollars":      (p.get("job_value_cents") or 0) // 100,
+        "assessed_value_dollars": (p.get("assessed_value_cents") or 0) // 100,
+        "is_new_construction":    p.get("is_new_construction"),
+    } for p in first_touch]
+
+    batches = mp.find_developer_batches(recs)
+    dropped = 0
+    for rec in recs:
+        owner = rec["owner_name"].strip()
+        reason = None
+        if owner and not mp.owner_is_individual(owner):
+            reason = "company owner"
+        elif mp.is_disqualified(rec):
+            reason = "disqualified type"
+        elif not owner and mp._batch_key(rec) in batches:
+            reason = "developer batch"
+        else:
+            new_const = bool(rec["is_new_construction"]) or mp.is_new_construction(rec)
+            if not new_const and not mp.passes_tag_filter(rec):
+                reason = "no qualifying project keyword"
+            elif not mp.passes_value_filter(rec, new_const):
+                reason = "no qualifying dollar value"
+        if reason:
+            db.set_permit_status(rec["id"], "Excluded", {
+                "exclude_reason": f"requalify: {reason}",
+                "excluded_by":    "filter_requalification",
+                "excluded_at":    db.now_iso(),
+            })
+            dropped += 1
+            log.info("Requalify excluded %s (%s) — %s",
+                     rec["id"], rec["property_address"], reason)
+
+    log.info("Requalification: %d of %d queued permit(s) excluded.",
+             dropped, len(recs))
+
+
 def build_registry_from_sent(sent_permits: list[dict]) -> dict:
     """Build registry dict from newly sent permits + existing DB registry."""
     # Start with current registry from DB
@@ -285,6 +342,10 @@ def run():
     # ── Step 1: Apply exclusions from WordPress ──────────────────────────────
     log.info("Step 1: Fetching exclusions from WordPress...")
     fetch_and_apply_exclusions()
+
+    # ── Step 1b: Re-qualify queue against current filters ────────────────────
+    log.info("Step 1b: Re-qualifying queued permits...")
+    requalify_queued()
 
     queued = db.get_queued_permits(CUSTOMER_ID)
     log.info("%d permit(s) queued for send.", len(queued))
