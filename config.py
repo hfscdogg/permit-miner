@@ -79,6 +79,22 @@ MIN_JOB_VALUE_DOLLARS = 75_000
 # Minimum assessed property value in dollars to qualify.
 MIN_ASSESSED_VALUE_DOLLARS = 750_000
 
+# Minimum declared job value for a new-construction permit to qualify.
+# New builds no longer auto-pass: a record must show either this job value
+# or a qualifying assessed value. No dollar signal at all = no mail.
+NEW_CONSTRUCTION_MIN_JOB_VALUE_DOLLARS = 400_000
+
+# Permit types/descriptions that never qualify, even when a new-construction
+# or project keyword also matches (e.g. "Building - Commercial New
+# Construction", "Residential Lot Grading" for a subdivision build-out).
+# These are commercial jobs or developer sitework, not homeowner projects.
+DISQUALIFYING_KEYWORDS = [
+    "commercial", "industrial", "tenant", "multi-family", "multifamily",
+    "apartment", "mixed use", "mixed-use",
+    "lot grading", "land disturbance", "erosion", "sitework", "site work",
+    "right of way", "right-of-way", "cell tower", "antenna", "telecom",
+]
+
 # Project keywords that qualify a permit. Deliberately excludes generic
 # tokens like "residential"/"single family" — county permit types (e.g.
 # Chesterfield's blanket "Residential Building") would auto-pass every
