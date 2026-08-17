@@ -62,6 +62,20 @@ def is_new_construction(permit: dict) -> bool:
     return any(kw in text for kw in config.NEW_CONSTRUCTION_KEYWORDS)
 
 
+def is_disqualified(permit: dict) -> bool:
+    """
+    Returns True for permits that can never qualify: commercial work,
+    developer sitework (lot grading, land disturbance), multi-family, etc.
+    Checked before new-construction classification so "Commercial New
+    Construction" can't ride in on the new-build keyword match.
+    """
+    text = (
+        (permit.get("permit_type") or "") + " " +
+        (permit.get("description") or "")
+    ).lower()
+    return any(kw in text for kw in config.DISQUALIFYING_KEYWORDS)
+
+
 def passes_tag_filter(permit: dict) -> bool:
     """
     Returns True if the permit describes a qualifying project.
@@ -79,16 +93,50 @@ def passes_tag_filter(permit: dict) -> bool:
 
 def passes_value_filter(permit: dict, new_construction: bool) -> bool:
     """
-    New construction always passes (vacant land has $0 assessed value).
-    Otherwise: assessed >= $500K OR job value >= $75K.
+    Every permit must show a real dollar signal — records with no job value
+    and no assessed value never qualify, new construction included.
+
+    New construction: job value >= $400K (vacant land assesses near $0, so
+    the declared build cost is the qualifier) OR assessed >= threshold
+    (teardown/rebuild on an expensive lot).
+    Otherwise: assessed >= threshold OR job value >= $75K.
     """
-    if new_construction:
-        return True
     assessed = permit.get("assessed_value_dollars") or 0
+    job_val = permit.get("job_value_dollars") or 0
+    if new_construction:
+        return (job_val >= config.NEW_CONSTRUCTION_MIN_JOB_VALUE_DOLLARS
+                or assessed >= config.MIN_ASSESSED_VALUE_DOLLARS)
     if assessed >= config.MIN_ASSESSED_VALUE_DOLLARS:
         return True
-    job_val = permit.get("job_value_dollars") or 0
     return job_val >= config.MIN_JOB_VALUE_DOLLARS
+
+
+DEVELOPER_BATCH_MIN = 3
+
+
+def _batch_key(permit: dict) -> tuple[str, str]:
+    """Street name (house number stripped) + permit type, lowercased."""
+    import re
+    street = re.sub(r"^[\d\-]+\s+", "", (permit.get("property_address") or "").strip().lower())
+    return (street, (permit.get("permit_type") or "").strip().lower())
+
+
+def find_developer_batches(permits: list[dict]) -> set[tuple[str, str]]:
+    """
+    Detect subdivision build-outs: 3+ permits in one pull sharing the same
+    street and permit type, none with an individual owner on record
+    (e.g. 430/432/434/436/438 Elm St, all "Residential Lot Grading").
+    A developer pulling lot permits is not a homeowner prospect.
+    """
+    counts: dict[tuple[str, str], int] = {}
+    for p in permits:
+        owner = (p.get("owner_name") or "").strip()
+        if owner and owner_is_individual(owner):
+            continue  # a named homeowner is never part of a developer batch
+        key = _batch_key(p)
+        if key[0]:
+            counts[key] = counts.get(key, 0) + 1
+    return {k for k, n in counts.items() if n >= DEVELOPER_BATCH_MIN}
 
 
 # ── Apollo contact enrichment ──────────────────────────────────────────────────
@@ -415,7 +463,14 @@ def build_preview_email(new_permits: list[dict]) -> str:
             " <span style='background:#e8943a;color:#fff;padding:2px 6px;"
             "border-radius:3px;font-size:10px;font-weight:bold;'>NEW BUILD</span>"
         ) if p.get("is_new_construction") else ""
-        assessed_str = dollars(p.get("assessed_value_dollars") or (p.get("assessed_value_cents") or 0) // 100)
+        assessed = p.get("assessed_value_dollars") or (p.get("assessed_value_cents") or 0) // 100
+        job_val = p.get("job_value_dollars") or (p.get("job_value_cents") or 0) // 100
+        if assessed:
+            assessed_str = f"{dollars(assessed)} assessed"
+        elif job_val:
+            assessed_str = f"{dollars(job_val)} job"
+        else:
+            assessed_str = "N/A"
         rows += f"""
         <tr style="border-bottom:1px solid #eee;">
           <td style="padding:10px 8px;">
@@ -458,7 +513,7 @@ def build_preview_email(new_permits: list[dict]) -> str:
     <tr style="background:#f5f5f5;font-size:11px;color:#999;text-transform:uppercase;">
       <th style="padding:8px;text-align:left;">Owner / Address</th>
       <th style="padding:8px;text-align:left;">Permit Type</th>
-      <th style="padding:8px;text-align:left;">Assessed Value</th>
+      <th style="padding:8px;text-align:left;">Value</th>
       <th style="padding:8px;text-align:left;">Contractor</th>
       <th style="padding:8px;text-align:left;">Exclude</th>
     </tr>
@@ -594,6 +649,12 @@ def run():
     # Track addresses seen this run to dedup across scrapers
     seen_addresses: set[str] = set()
 
+    # Subdivision build-outs: same street + permit type, no individual owner
+    developer_batches = find_developer_batches(all_raw)
+    if developer_batches:
+        log.info("Developer batches detected (filtered): %s",
+                 ["%s / %s" % k for k in sorted(developer_batches)])
+
     for p in all_raw:
         owner = (p.get("owner_name") or "").strip()
         address = (p.get("property_address") or "").strip()
@@ -625,6 +686,16 @@ def run():
             total_filtered += 1
             continue
 
+        # Commercial / developer-sitework types never qualify
+        if is_disqualified(p):
+            total_filtered += 1
+            continue
+
+        # Subdivision build-out rows (same street + type, no individual owner)
+        if not owner and _batch_key(p) in developer_batches:
+            total_filtered += 1
+            continue
+
         new_const = is_new_construction(p)
 
         # Tag / permit type filter
@@ -632,9 +703,11 @@ def run():
             total_filtered += 1
             continue
 
-        # Value filter — try ArcGIS lookup if job_value is missing
+        # Value filter — try ArcGIS lookup if assessed value is missing.
+        # Runs for new construction too: a new build with no declared job
+        # value can still qualify via a high-value lot (teardown/rebuild).
         assessed = p.get("assessed_value_dollars") or 0
-        if assessed == 0 and not new_const:
+        if assessed == 0:
             assessed = get_assessed_value(address, zip_code)
             p["assessed_value_dollars"] = assessed
 
